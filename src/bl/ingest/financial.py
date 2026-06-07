@@ -32,10 +32,15 @@ ACCOUNT_MAP = {
 
 
 def _to_num(s: object) -> float | None:
+    t = str(s).strip().replace(",", "")
+    neg = t.startswith("(") and t.endswith(")")     # 괄호 음수 표기 (1,234) → -1234
+    if neg:
+        t = t[1:-1]
     try:
-        return float(str(s).replace(",", ""))
+        v = float(t)
     except (TypeError, ValueError):
         return None
+    return -v if neg else v
 
 
 def parse_fnlttSinglAcntAll(payload: dict, corp_code: str, base_ym: int) -> dict | None:

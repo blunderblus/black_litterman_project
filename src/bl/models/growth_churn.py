@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from bl.common.logging import get_logger
-from bl.features.builder import FEATURE_COLS
+from bl.features.builder import FEATURE_COLS, LABEL_HORIZON
 from bl.models.validation import evaluate, walk_forward_splits
 
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ def _spw(y: np.ndarray) -> float:
 def _cv_auc(df: "pd.DataFrame", label_col: str, feats: list[str], seed: int) -> float | None:
     """walk-forward out-of-sample 평균 AUC(없으면 None). confidence 의 경험적 근거."""
     aucs = []
-    for tr, te in walk_forward_splits(df, "base_ym", n_splits=3):
+    for tr, te in walk_forward_splits(df, "base_ym", n_splits=3, embargo=LABEL_HORIZON):
         ytr = df.iloc[tr][label_col].to_numpy("float64")
         if len(np.unique(ytr)) < 2:
             continue

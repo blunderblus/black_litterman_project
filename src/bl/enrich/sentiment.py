@@ -59,14 +59,14 @@ def _gemini_score(texts: list[str], settings: "Settings") -> list[float] | None:
 
         genai.configure(api_key=key)
         model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        import re
+
         scores: list[float] = []
         for t in texts:
             prompt = f"다음 기업 뉴스의 감성을 -1(매우 부정)~1(매우 긍정) 실수 하나로만 답하라:\n{t[:200]}"
             r = model.generate_content(prompt)
-            try:
-                scores.append(float(str(r.text).strip().split()[0]))
-            except (ValueError, IndexError):
-                scores.append(0.0)
+            mobj = re.search(r"-?\d+(?:\.\d+)?", str(getattr(r, "text", "")))
+            scores.append(float(np.clip(float(mobj.group()), -1.0, 1.0)) if mobj else 0.0)
         return scores
     except Exception as e:  # noqa: BLE001
         log.warning(f"Gemini 채점 실패 → 규칙기반 폴백: {e}", extra={"stage": "enrich.sentiment"})

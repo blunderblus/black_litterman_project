@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pandas as pd
 
 if TYPE_CHECKING:
-    import pandas as pd
+    pass
 
 # 대시보드에 노출할 컬럼(존재하는 것만 출력)
 EXPORT_COLS = [
@@ -26,14 +27,20 @@ EXPORT_COLS = [
 
 
 def _clean(v):
-    """JSON 직렬화용 정리: NaN/Inf→None, numpy 스칼라→파이썬 스칼라."""
+    """JSON 직렬화용 정리: bool→bool, pd.NA/NaT/NaN/Inf→None, numpy 스칼라→파이썬 스칼라."""
+    if isinstance(v, (bool, np.bool_)):              # bool 먼저(np.bool_/bool은 int 서브타입)
+        return bool(v)
+    try:
+        na = pd.isna(v)                              # pd.NA, pd.NaT, NaN 등(배열은 ndim>0로 제외)
+        if np.ndim(na) == 0 and bool(na):
+            return None
+    except (TypeError, ValueError):
+        pass
     if isinstance(v, (np.floating, float)):
         f = float(v)
         return None if (np.isnan(f) or np.isinf(f)) else round(f, 6)
     if isinstance(v, (np.integer, int)):
         return int(v)
-    if v is None or (isinstance(v, float) and np.isnan(v)):
-        return None
     return v
 
 

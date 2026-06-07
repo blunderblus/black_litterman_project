@@ -23,6 +23,8 @@ from typing import Any
 _SECRET_PATTERNS = [
     re.compile(r"(crtfc_key|api[_-]?key|client[_-]?secret|authkey|serviceKey)=([^&\s\"]+)", re.I),
     re.compile(r"(Bearer)\s+([A-Za-z0-9\.\-_]+)", re.I),
+    # ECOS 등 키가 URL path 세그먼트에 들어가는 경우(/StatisticSearch/<KEY>/...) 마스킹
+    re.compile(r"(/StatisticSearch/)([^/\s]+)", re.I),
 ]
 
 

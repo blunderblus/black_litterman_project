@@ -36,17 +36,53 @@ def _load_sample(sample_dir: str | Path) -> dict[str, pd.DataFrame]:
     return {n: read_parquet(d / f"{n}.parquet") for n in names}
 
 
-def _returns_panel(post: pd.DataFrame, corp_order: list[str], base_ym: int) -> np.ndarray:
-    """post_data → 자산별 잔액 log-return 패널(T×N, base_ym 이하). corp_order 순으로 정렬."""
+def _returns_panel(
+    post: pd.DataFrame, corp_order: list[str], base_ym: int
+) -> tuple[np.ndarray, list[str]]:
+    """post_data → 자산별 잔액 log-return 패널(T×N) + 유효 corp 리스트(완전관측 열만).
+
+    견고성: corp_code dtype 정규화(int↔str), 0/음수 잔액→NaN, 부분관측/미매칭 열 제거
+    (corp_order 와 동기). 비유한 열이 BL 공분산 계산에서 크래시하지 않도록 사전 차단.
+    """
     wide = (
         post[post["base_ym"] <= base_ym]
         .pivot_table(index="base_ym", columns="corp_code", values="bal", aggfunc="last")
         .sort_index()
     )
-    wide = wide.reindex(columns=corp_order)
-    logret = np.log(wide.to_numpy(dtype="float64"))
-    panel = np.diff(logret, axis=0)                  # (T-1, N) log-return
-    return panel
+    wide.columns = wide.columns.astype(str)              # dtype 정규화(int corp_code 대응)
+    order = [str(c) for c in corp_order]
+    wide = wide.reindex(columns=order)
+    arr = wide.to_numpy(dtype="float64")
+    arr = np.where(arr > 0, arr, np.nan)                 # 0/음수 잔액 → NaN(log 보호)
+    panel = np.diff(np.log(arr), axis=0)                 # (T-1, N) log-return
+    valid = np.isfinite(panel).all(axis=0) if panel.size else np.zeros(len(order), bool)
+    valid_corps = [c for c, v in zip(order, valid, strict=True) if v]
+    return panel[:, valid], valid_corps
+
+
+def _view_scaler(assets: pd.DataFrame) -> dict:
+    """뷰 4축 raw 신호의 (mean,std) — build_views.axis_raw 와 동일 정의(단면 표준화 명시화).
+
+    배치 z-score 폴백 경로(추론 누수 경고)를 제거하고, 단면 표준화를 의도된 스케일러로 주입한다.
+    """
+    n = len(assets)
+
+    def col(name: str) -> np.ndarray:
+        return assets[name].fillna(0).to_numpy("float64") if name in assets.columns else np.zeros(n)
+
+    have_flow = "trx_in" in assets.columns and "trx_out" in assets.columns
+    flow = np.sign(col("trx_in") - col("trx_out")) if have_flow else 1.0
+    axes = {
+        "news": col("gemini_score"),
+        "pattern": col("prob_growth_raw") - col("prob_churn_raw"),
+        "anomaly": col("anomaly_score_raw") * flow,
+        "relationship": col("relationship_score"),
+    }
+    out: dict = {}
+    for k, v in axes.items():
+        sd = float(np.std(v))
+        out[k] = (float(np.mean(v)), sd if sd > 1e-12 else 1.0)
+    return out
 
 
 def _assemble_assets(frames: dict, ml: pd.DataFrame, an: pd.DataFrame, base_ym: int) -> pd.DataFrame:
@@ -64,7 +100,10 @@ def _assemble_assets(frames: dict, ml: pd.DataFrame, an: pd.DataFrame, base_ym: 
         sent.rename(columns={"sentiment_score": "gemini_score", "confidence": "gemini_confidence"}),
         on="corp_code", how="left",
     )
-    fin_cash = fin[["corp_code", "cash_amount"]]
+    # 다년도 재무는 corp별 최신 1행으로 dedup 후 결합(중복 행 폭증 방지)
+    fin_cash = (fin.sort_values("base_ym").groupby("corp_code", as_index=False).last()
+                [["corp_code", "cash_amount"]] if not fin.empty
+                else fin.assign(cash_amount=pd.NA)[["corp_code", "cash_amount"]])
     a = a.merge(fin_cash, on="corp_code", how="left")
 
     a["current_bal"] = a["bal"].astype("float64")
@@ -118,10 +157,16 @@ def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, to
     assets = _assemble_assets(frames, ml, an, base_ym)
     assets = assets.dropna(subset=["current_bal"]).reset_index(drop=True)
     corp_order = assets["corp_code"].astype("string").tolist()
-    panel = _returns_panel(frames["post_data"], corp_order, base_ym)
+    panel, valid = _returns_panel(frames["post_data"], corp_order, base_ym)
+    if len(valid) < len(corp_order):                     # 패널 비유효 자산 제거 + assets 동기
+        log.warning(f"수익률 패널 비유효 {len(corp_order) - len(valid)}개 자산 제외",
+                    extra={"stage": "pipeline", "kept": len(valid)})
+        assets = (assets.set_index(assets["corp_code"].astype("string"))
+                  .loc[valid].reset_index(drop=True))
 
-    # BL 입력 → 사후수익 → 최적화
-    inp = bi.assemble_bl_inputs(assets, panel)
+    # BL 입력 → 사후수익 → 최적화 (뷰 스케일러 명시 주입: 배치 z-score 폴백 경로 제거)
+    scaler = _view_scaler(assets)
+    inp = bi.assemble_bl_inputs(assets, panel, scaler=scaler)
     er = opt.posterior_expected_return(inp)
     sigma_post = opt.posterior_covariance(inp)
     w = opt.optimize_weights(er, sigma_post, w_max=0.10)
@@ -132,6 +177,8 @@ def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, to
         "corp_code": assets["corp_code"].astype("string"),
         "corp_name": assets["TARGET_NAME"],
         "tier": assets["TIER"],
+        # tier_class: funding_gap 계수용 운영등급(score 독립). T1→PRIME/T2→CORE/T3→WATCH
+        "tier_class": assets["TIER"].map({"T1": "PRIME", "T2": "CORE", "T3": "WATCH"}).fillna("WATCH"),
         "sector_code": assets["sector_code"],
         "region": assets["region"],
         "current_bal": assets["current_bal"],

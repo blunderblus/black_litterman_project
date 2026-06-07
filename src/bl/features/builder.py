@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from bl.common.dates import ym_add
+
 if TYPE_CHECKING:
     import duckdb
 
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
 CHURN_DROP = 0.5
 GROWTH_RISE = 1.2
 LABEL_HORIZON = 3
+FIN_DISCLOSURE_LAG = 3   # 사업보고서 공시지연(개월): fin_ym 이후 이 개월부터 사용 가능(look-ahead 방지)
 
 # 피처 컬럼(이 목록에 미래/라벨 컬럼은 절대 포함하지 않는다 — 누수 차단의 단일 소스).
 FEATURE_COLS = [
@@ -67,15 +70,17 @@ def build_features_from_frames(
     df = _balance_features(post_data)
 
     # 재무(ASOF 단순화: corp별 최신 1행 broadcast) + has_financial
+    fin_cols = ["revenue", "net_income", "total_assets", "total_equity", "cash_amount", "debt_ratio"]
     fin = financial_wide.copy()
     if not fin.empty:
         fin = fin.sort_values("base_ym").groupby("corp_code", as_index=False).last()
         fin["debt_ratio"] = fin["total_liabilities"] / fin["total_assets"].replace(0, np.nan)
-        df = df.merge(
-            fin[["corp_code", "revenue", "net_income", "total_assets", "total_equity",
-                 "cash_amount", "debt_ratio"]],
-            on="corp_code", how="left",
-        )
+        fin["_fin_avail_ym"] = fin["base_ym"].map(lambda y: ym_add(int(y), FIN_DISCLOSURE_LAG))
+        df = df.merge(fin[["corp_code", "_fin_avail_ym", *fin_cols]], on="corp_code", how="left")
+        # point-in-time: 공시 가용 시점 이전(base_ym < 공시가용월)에는 재무를 비운다(look-ahead 차단)
+        not_avail = df["_fin_avail_ym"].notna() & (df["base_ym"] < df["_fin_avail_ym"])
+        df.loc[not_avail, fin_cols] = np.nan
+        df = df.drop(columns=["_fin_avail_ym"])
     df["has_financial"] = df["revenue"].notna().astype(int) if "revenue" in df.columns else 0
 
     # 매크로(base_ym 시점 정합)

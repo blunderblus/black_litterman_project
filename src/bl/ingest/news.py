@@ -47,6 +47,7 @@ def collect_news(settings: "Settings", targets: list[tuple[str, str]], display: 
     if not (cid and csec):
         raise ValueError("BL_NAVER_CLIENT_ID/SECRET 미설정 — 뉴스 수집 불가(데모는 sample 사용).")
     headers = {"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": csec}
+    display = max(1, min(int(display), 100))           # Naver display 상한 100
     rows: list[dict] = []
     for cc, query in targets:
         payload = get_json(NAVER_URL, params={"query": query, "display": display, "sort": "date"},
