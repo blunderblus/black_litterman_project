@@ -1,0 +1,10 @@
+# 모든 텍스트 파일은 저장소에서 LF로 정규화(크로스플랫폼 CRLF 잡음 방지).
+* text=auto eol=lf
+
+# 바이너리(diff/eol 처리 안 함)
+*.parquet binary
+*.pkl binary
+*.zip binary
+*.png binary
+*.woff binary
+*.woff2 binary

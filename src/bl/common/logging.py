@@ -48,10 +48,10 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "msg": mask_secrets(record.getMessage()),
         }
-        # log_stage 등으로 들어온 구조적 extra 필드 병합
+        # log_stage 등으로 들어온 구조적 extra 필드 병합(문자열 값도 시크릿 마스킹)
         for k, v in record.__dict__.items():
             if k not in self._RESERVED and not k.startswith("_"):
-                payload[k] = v
+                payload[k] = mask_secrets(v) if isinstance(v, str) else v
         if record.exc_info:
             payload["exc"] = mask_secrets(self.formatException(record.exc_info))
         return json.dumps(payload, ensure_ascii=False, default=str)
