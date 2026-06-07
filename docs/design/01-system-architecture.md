@@ -1,5 +1,5 @@
 - 문서명: BL 시스템 아키텍처 설계서 (System Architecture Design)
-- 버전: v0.2
+- 버전: v0.3
 - 작성일: 2026-06-07
 - 상태: Draft
 - 작성주체: BL 수석 데이터 사이언티스트 / 아키텍처 팀
@@ -49,7 +49,7 @@
 ## 1.2 세분화 축
 
 - **Tier(고객축):** T1 상장 외감 / T2 비상장 중소 / T3 가상 섹터 노드(`IS_VIRTUAL`)
-- **Track(수집축):** A 매크로(한국은행 ECOS 금리·BSI, FinanceDataReader 지수) / B Naver 뉴스 / C BigKinds 뉴스
+- **Track(수집축):** A 매크로(한국은행 ECOS 금리·BSI, FinanceDataReader 지수) / B Naver 뉴스
 
 ## 1.3 "AI 3종 모델" vs "BL 뷰 4축" (개념 분리)
 
@@ -95,7 +95,7 @@
 
 - **pickle 폐기:** 버전 취약·임의코드 실행 위험으로 직렬화는 Parquet/DuckDB만 사용([ADR-0002](./adr/ADR-0002-storage-format.md)).
 - **Colab/Drive 종속 제거:** 모든 경로는 `.env`/pydantic-settings 기반. 헤드리스 실행 가능.
-- **No-Crawl 우선:** 안정적 API/공공데이터(OpenDART, ECOS, Naver/BigKinds API) 사용으로 IP 차단·법적 리스크 회피.
+- **No-Crawl 우선:** 안정적 API/공공데이터(OpenDART, ECOS, Naver 뉴스 API) 사용으로 IP 차단·법적 리스크 회피.
 - **시크릿 평문 금지:** API 키/시크릿은 코드·설정파일에 평문 저장 금지, Secret Manager/환경변수로만 주입(상세 §8.2).
 - **단방향 의존:** 상위 레이어는 하위 레이어만 참조한다(아래→위 참조 금지). `common`은 모든 레이어가 참조 가능한 유일한 공통 의존.
 
@@ -114,7 +114,6 @@ flowchart LR
     ECOS[한국은행 ECOS<br/>금리·BSI]
     FDR[FinanceDataReader<br/>지수]
     NAVER[Naver 뉴스 API<br/>Track B]
-    BIGKINDS[BigKinds<br/>Track C]
     GEMINI[Google Gemini<br/>2.5 Flash-Lite]
   end
 
@@ -169,7 +168,6 @@ flowchart LR
   ECOS --> ING_MAC
   FDR --> ING_MAC
   NAVER --> ING_NEWS
-  BIGKINDS --> ING_NEWS
 
   UNI --> ING_FIN
   ING_FIN --> DUCK
@@ -215,9 +213,9 @@ flowchart LR
 
 | # | 레이어 | 책임 | 과거 노트북 대응 |
 |---|---|---|---|
-| 1 | **수집(Ingestion)** | 유니버스 정의(`TARGET_MASTER`), 외부 API에서 재무/매크로/뉴스 원천 적재 + 내부 `post_data` 적재(접근통제). 멱등 upsert, 결정적 정렬. | 01 재무, 02 track_A, 03 track_B, 04 track_C |
+| 1 | **수집(Ingestion)** | 유니버스 정의(`TARGET_MASTER`), 외부 API에서 재무/매크로/뉴스 원천 적재 + 내부 `post_data` 적재(접근통제). 멱등 upsert, 결정적 정렬. | 01 재무, 02 track_A, 03 track_B, 04 track_C(격상판 제외: BigKinds 폐쇄적 API) |
 | 2 | **저장(Storage)** | DuckDB(수집/OLAP) + Parquet(분석/교환). 이중적재 lineage(RAW_FINANCIAL+FINANCIAL_WIDE). **ID crosswalk** 관리. | (인프라) |
-| 3 | **처리·피처(Processing)** | 뉴스 dedup(BigKinds 우선), Gemini 감성 enrich, 시점 분리 피처(재무·매크로·감성·거래관계) 생성. | 05 뉴스정제, 06 gemini, 07 전처리 |
+| 3 | **처리·피처(Processing)** | 뉴스 dedup, Gemini 감성 enrich, 시점 분리 피처(재무·매크로·감성·거래관계) 생성. | 05 뉴스정제, 06 gemini, 07 전처리 |
 | 4 | **모델(ML)** | XGBoost 성장/이탈 분류, IsolationForest 이상탐지. 시점 분리 검증, 스케일러/모델 저장. | 08 모델학습 |
 | 5 | **BL 엔진(BL Engine)** | 뷰 행렬 P·Q·Ω(4축), FULL 공분산 Σ, $w_{mkt}$ 구성 → 사후 기대수익·최적 가중. | 09 BL입력, 10 BL최적화 |
 | 6 | **서빙·대시보드(Serving)** | 분석 마트 생성, 외부 JSON 추출, Quarto+Plotly 파라미터화 대시보드, GitHub Pages 정적 배포. | 11 / 11-1 대시보드 |
@@ -261,7 +259,7 @@ flowchart TD
 | `universe` | T1/T2/T3 타겟 마스터 구성·복원. T3는 가상 섹터 노드. | DART corp_code 목록, ML/감성/재무 후보(FULL OUTER JOIN) | `TARGET_MASTER` | PK `TARGET_ID`; `biz_reg_no`, `jurir_no`, `stock_code`, `TIER`, `IS_VIRTUAL`, `SECTOR_CODE` |
 | `ingest.financial` | OpenDART REST(`fnlttSinglAcntAll.json`) 재무 적재. status='000' & list 비어있지 않을 때만 적재. | corp_code, bsns_year, reprt_code=11011, fs_div=CFS/OFS | `RAW_FINANCIAL`, `FINANCIAL_WIDE` | `RAW_FINANCIAL` PK `(TARGET_ID, ACCOUNT_ID, PERIOD)`; `FINANCIAL_WIDE` 키 `(corp_code, base_ym)` (TIER는 속성; 비고 참조) |
 | `ingest.macro` | ECOS 금리·BSI, FinanceDataReader 지수 적재(Track A). | METRIC_CODE, DATE 범위 | `RAW_MACRO` | PK `(METRIC_CODE, DATE)` |
-| `ingest.news` | Naver(Track B)·BigKinds(Track C) 뉴스 적재. | TARGET 검색키워드, 기간 | `RAW_NEWS` | PK `NEWS_HASH`; `TARGET_ID`, `SOURCE`, `PUB_DATE` |
+| `ingest.news` | Naver(Track B) 뉴스 적재. | TARGET 검색키워드, 기간 | `RAW_NEWS` | PK `NEWS_HASH`; `TARGET_ID`, `SOURCE`, `PUB_DATE` |
 | `ingest.post` | 내부 거래/잔액/관계(`post_data`) 적재(접근통제). 과거 `post_owned_set` PLACEHOLDER 대체. | 내부 DB/CSV(접근통제) | `post_data`, `POST_OWNED_CORPS` | `corp_code`(or `jurir_no`)→crosswalk 정규화; `bal`, `w_current`, `relationship_score`, `account_count`, `has_payroll`, `is_main_bank` |
 
 > 비고 1: `FINANCIAL_WIDE.cash_amount`는 재무보유 고객의 BL 월렛 추정 입력으로, `ifrs-full_CashAndCashEquivalents` + 단기금융상품/정기예금 계정 합계, 없으면 `ifrs-full_CurrentAssets` fallback. 최종 `wallet_size`(비재무·T3 포함) 산정은 [03 BL §4.1](./03-bl-model-design.md)에 위임한다. 수집은 `BL_FULL_REBUILD`/`BL_ONLY_EMPTY` 플래그로 풀리빌드/증분 동작을 제어한다(§8.1).
@@ -271,7 +269,7 @@ flowchart TD
 
 | 컴포넌트 | 책임 | 주요 입력 | 주요 출력 | 비고 |
 |---|---|---|---|---|
-| `refine` | 뉴스 dedup(BigKinds 우선), Kiwi 키워드 추출. | `RAW_NEWS` | `NEWS_REFINED` | 도메인 특화 정제; 결정적 dedup |
+| `refine` | 뉴스 dedup, Kiwi 키워드 추출. | `RAW_NEWS` | `NEWS_REFINED` | 도메인 특화 정제; 결정적 dedup |
 | `enrich` | Gemini 2.5 Flash-Lite 뉴스 감성 + confidence 캘리브레이션. | `NEWS_REFINED` | `COMPANY_SENTIMENT` 키 `(TARGET_ID, base_ym)`; `sentiment_score`(원천), `event_cnt`, `risk_score`, `confidence` | 시점정합 `base_ym` 부착([02 §3.1.6](./02-data-pipeline.md)); confidence는 하드코딩 금지·검증셋 캘리브레이션. `sentiment_score`는 03의 `gemini_score`·05의 `news_sentiment`/`view_news`와 동일 계보(별칭) |
 | `features` | 시점 분리 시계열·재무·매크로·감성·거래관계 피처. 학습기준 스케일러 저장. | `FINANCIAL_WIDE`, `RAW_MACRO`, `COMPANY_SENTIMENT`, `post_data`, crosswalk | `features.parquet` (asset × base_ym) | look-ahead 차단; `bal_future_3m`은 라벨 전용; `relationship_score`·`account_count`·`has_payroll`·`is_main_bank`(post_data) 포함 |
 
@@ -344,7 +342,7 @@ flowchart TB
     direction TB
     A1[OpenDART]
     A2[ECOS / FDR]
-    A3[Naver / BigKinds]
+    A3[Naver 뉴스]
     A4[Gemini]
   end
 
@@ -378,11 +376,11 @@ flowchart TB
 | 구성요소 | 역할 | 비고 |
 |---|---|---|
 | **컴퓨트 노드** | 수집~BL 최적화 배치 실행. CLI 또는 얇은 실행 노트북. | GPU 있으면 CuPy 선형대수 가속; 없으면 NumPy/SciPy. 단일 코드 디스패치. |
-| **API 클라이언트 공통** | 외부 API(OpenDART/ECOS/Naver/BigKinds/Gemini) 호출 제어. | 지수백오프·쿼터가드·재시도, 실패는 `failed_companies` 데드레터로 격리(상세 [02 파이프라인 §1.1](./02-data-pipeline.md)). |
+| **API 클라이언트 공통** | 외부 API(OpenDART/ECOS/Naver/Gemini) 호출 제어. | 지수백오프·쿼터가드·재시도, 실패는 `failed_companies` 데드레터로 격리(상세 [02 파이프라인 §1.1](./02-data-pipeline.md)). |
 | **객체 스토리지** | Parquet 계층(raw/interim/processed/sample) 보관·교환. | 분석/교환 표준 포맷; 버전·파티셔닝 가능. |
 | **DuckDB(파일 모드)** | 수집/적재/OLAP. ASOF JOIN, 멱등 upsert. | 단일 파일 `raw_collection.duckdb`는 **컴퓨트 노드 로컬**에 위치. 쓰기는 `DuckDB→Parquet export`(COPY TO), 읽기는 `httpfs`/외부테이블로 객체스토리지 Parquet을 직접 쿼리. 필요시 읽기전용 서버 모드. |
 | **내부 소스(post_data)** | 내부 보유/거래 잔액·관계 적재(접근통제). | 외부 API와 분리; crosswalk 경유 결합. 공개 데모에는 미포함(합성으로 대체). |
-| **Secret Manager** | OpenDART/ECOS/Naver/BigKinds/Gemini 키 관리. | 평문 노출 금지(§2.3); 환경변수로 주입, 로그 마스킹. |
+| **Secret Manager** | OpenDART/ECOS/Naver/Gemini 키 관리. | 평문 노출 금지(§2.3); 환경변수로 주입, 로그 마스킹. |
 | **GitHub Pages** | 합성 샘플데이터 기반 정적 대시보드 데모 배포. | 운영본은 접근통제; 공개 데모는 합성 데이터만. |
 
 ## 5.3 환경 분리
@@ -418,7 +416,7 @@ black-litterman/
       ingest/                    # 수집(API/내부→RAW_*)
         financial.py             #  OpenDART REST → RAW_FINANCIAL/FINANCIAL_WIDE
         macro.py                 #  ECOS·FDR → RAW_MACRO
-        news.py                  #  Naver·BigKinds → RAW_NEWS
+        news.py                  #  Naver → RAW_NEWS
         post.py                  #  내부 post_data 적재(접근통제) → post_data/POST_OWNED_CORPS
       refine/                    # 뉴스 dedup·키워드
         news_dedup.py
@@ -516,7 +514,7 @@ black-litterman/
 
 ## 8.2 시크릿 전략
 
-- API 키(OpenDART `crtfc_key`, ECOS, Naver, BigKinds, Gemini)는 **코드/설정 파일에 평문 금지**(§2.3). Secret Manager 또는 환경변수로만 주입.
+- API 키(OpenDART `crtfc_key`, ECOS, Naver, Gemini)는 **코드/설정 파일에 평문 금지**(§2.3). Secret Manager 또는 환경변수로만 주입.
 - 과거 ECOS API 키 평문 노출 결함을 회귀 방지 항목으로 명시한다.
 - `.env.example`에는 키 이름만 두고 값은 비운다. `.env`는 git-ignore.
 
@@ -647,7 +645,7 @@ erDiagram
 - $\Omega \propto 1/\text{DRI}^2$ (데이터 빈약 고객 뷰 불신, BL Ω 의미론 정합)
 - DuckDB 네이티브 처리(ASOF JOIN, 멱등 upsert)
 - 이중적재 lineage(`RAW_FINANCIAL` + `FINANCIAL_WIDE`)
-- 도메인 특화 뉴스 처리(Kiwi 키워드, BigKinds 우선 dedup)
+- 도메인 특화 뉴스 처리(Kiwi 키워드, 결정적 뉴스 dedup)
 - 2그룹(재무 유무) 모델링
 
 ---

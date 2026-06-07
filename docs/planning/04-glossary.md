@@ -1,5 +1,5 @@
 - 문서명: BL 용어집 (Glossary)
-- 버전: v0.2
+- 버전: v0.3
 - 작성일: 2026-06-07
 - 상태: Draft
 - 작성주체: 수석 데이터 사이언티스트 (BL TF)
@@ -171,7 +171,6 @@ erDiagram
 |---|---|---|---|
 | A | 매크로 | 한국은행 ECOS(기준금리·BSI), FinanceDataReader(지수) | 금리 레짐·경기 국면 등 거시 외부조건을 수집해 `RAW_MACRO`에 적재. **$\lambda$ 캘리브레이션($r_f$=ECOS 금리), 금리레짐·팩터 공분산 구조, 매크로 상대뷰**에 활용한다(매크로는 $w_{mkt}$를 직접 보정하지 않음; $w_{mkt}$는 `FINANCIAL_WIDE.cash_amount`에서 산정). |
 | B | Naver 뉴스 | Naver 뉴스 API | 기업별 뉴스를 수집해 `RAW_NEWS`(`SOURCE='naver'`)에 적재, refine·Gemini 감성의 입력. |
-| C | BigKinds 뉴스 | BigKinds(한국언론진흥재단) | 언론진흥재단 뉴스 빅데이터로 `RAW_NEWS`(`SOURCE='bigkinds'`)에 통합. **동일 기사 충돌 시 BigKinds 우선 보존**(dedup 우선 소스, §6 dedup 참조). |
 
 ---
 
@@ -186,14 +185,14 @@ erDiagram
 | RAW_FINANCIAL | 원천(RAW) | DART 계정 단위 원천 재무. `(TARGET_ID, ACCOUNT_ID, PERIOD)` PK, `AMOUNT`·`ACCOUNT_NM` 등. RAW+WIDE 이중적재 lineage의 RAW 측(보존 강점). |
 | FINANCIAL_WIDE | 가공 테이블 | 기업·연도 단위 재무 요약 와이드 테이블. `corp_code`, `base_ym`, `jurir_no`, `revenue`, `total_assets`, `cash_amount`(현금성자산+단기예금 합산, **지갑 프록시**, $w_{mkt}$ 원천) 등. |
 | RAW_MACRO | 원천(RAW) | 거시지표 시계열. `(METRIC_CODE, DATE)` PK, `VALUE`. Track A(ECOS·FDR 지수) 산출물로 금리·BSI·KOSPI 등 포함. |
-| RAW_NEWS | 원천(RAW) | 수집 뉴스 원천. `NEWS_HASH` PK, `TARGET_ID`, `TITLE`, `PUB_DATE`, `SOURCE`(naver/bigkinds), `URL`. refine·감성의 입력. dedup 시 BigKinds 우선(§ dedup 항목). |
-| NEWS_REFINED | 가공 테이블 | refine 단계 산출. 유사뉴스 dedup(BigKinds 우선)과 Kiwi 키워드 추출을 거친 정제 뉴스로, COMPANY_SENTIMENT(enrich)의 입력이다([데이터 파이프라인 §2.1](../design/02-data-pipeline.md)). |
+| RAW_NEWS | 원천(RAW) | 수집 뉴스 원천. `NEWS_HASH` PK, `TARGET_ID`, `TITLE`, `PUB_DATE`, `SOURCE`(naver), `URL`. refine·감성의 입력. |
+| NEWS_REFINED | 가공 테이블 | refine 단계 산출. 유사뉴스 dedup과 Kiwi 키워드 추출을 거친 정제 뉴스로, COMPANY_SENTIMENT(enrich)의 입력이다([데이터 파이프라인 §2.1](../design/02-data-pipeline.md)). |
 | COMPANY_SENTIMENT | 가공 테이블 | 기업·기간 단위 뉴스 감성 집계. `TARGET_ID`, `base_ym`, `sentiment_score`(**감성 원천 컬럼**), `risk_score`, `event_cnt`, `confidence` 등. Gemini enrich 산출물. `sentiment_score`가 canonical 원천이며, 03 BL설계의 `gemini_score`·05 마트의 `news_sentiment`/`view_news`는 모두 그 별칭/파생이다. |
 | ML_PREDICTIONS | 가공 테이블 | XGBoost(성장/이탈)·Isolation Forest(이상) 예측 결과. `corp_code`(키), `as_of_date`, `biz_reg_no`(추적용, 결합키 아님), `prob_growth_raw`, `prob_churn_raw`, `anomaly_score_if`, `confidence` 등. 시점 분리 검증을 거친 출력만 적재. |
 | post_data | 분석 데이터셋 | 학습·전처리 통합 데이터셋(과거 07 대응). 재무·매크로·감성·거래관계(`relationship_score`, `account_count`, `has_payroll`, `is_main_bank`)·`bal`·`r_log`(log-return) 등을 시점 엄격 분리로 구성(look-ahead 차단). |
 | bl_input_data | BL 입력셋 | BL 최적화 직전 입력 묶음(과거 09 대응). 자산별 $w_{mkt}$, $Q_{final}$(4축), `DRI`, `confidence`, $w_{current}$, $w_{hybrid}$, 4축 원천(`prob_growth_raw`/`prob_churn_raw`/`gemini_score`/`relationship_score`) 등을 단위정합 상태로 보관. $\Sigma$(FULL+Ledoit-Wolf)·$P$·$\Omega$ 행렬은 사이드카 Parquet(`bl_sigma`/`bl_P`/`bl_omega`)에 저장. |
 | bl_dashboard_mart | 서빙 마트 | 대시보드·영업용 최종 마트(과거 10/11 대응). 핵심 컬럼: `corp_code`/`target_id`, `bl_return`($E[R]$), `current_weight`/`market_weight`/`target_weight`/`weight_diff`, `marketing_score`, `funding_gap`, `action_guide`, 4축 신호(`prob_growth_raw`/`prob_churn_raw`/`anomaly_score_raw`/`news_sentiment`/`sentiment_confidence`), Tier·DRI 등. 컬럼 권위 스키마는 [데이터 파이프라인 §3.2.3](../design/02-data-pipeline.md). |
-| dedup(중복 제거) | 처리 규약 | RAW_NEWS의 동일/유사 기사 병합 규칙. dedup 키는 `NEWS_HASH`(정규화 본문 해시) + 제목·발행일 유사도이며, **동일 기사 충돌 시 BigKinds(Track C)를 우선 보존**한다. refine 단계에서 적용([데이터 파이프라인 §2.1](../design/02-data-pipeline.md)). |
+| dedup(중복 제거) | 처리 규약 | RAW_NEWS의 동일/유사 기사 병합 규칙. dedup 키는 `NEWS_HASH`(정규화 본문 해시) + 제목·발행일 유사도이며, **동일 기사 충돌 시 결정적 정렬키로 1건만 보존**한다. refine 단계에서 적용([데이터 파이프라인 §2.1](../design/02-data-pipeline.md)). |
 
 ```mermaid
 flowchart LR

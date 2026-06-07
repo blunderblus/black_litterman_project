@@ -1,5 +1,5 @@
 - 문서명: BL 요구사항 정의서(PRD, Product Requirements Document)
-- 버전: v0.2
+- 버전: v0.3
 - 작성일: 2026-06-07
 - 상태: Draft
 - 작성주체: BL 프로젝트팀 (수석 데이터 사이언티스트 / 소매금융기관)
@@ -120,7 +120,7 @@ flowchart LR
 
 | ID | 우선순위 | 요구사항 |
 |---|---|---|
-| **FR-01** | **Must** | 외부 공공 API를 통해 재무(DART), 매크로(한국은행 ECOS·FinanceDataReader), 뉴스(Naver, BigKinds)를 멱등(idempotent) 수집하여 DuckDB(`raw_collection.duckdb`)에 적재한다. |
+| **FR-01** | **Must** | 외부 공공 API를 통해 재무(DART), 매크로(한국은행 ECOS·FinanceDataReader), 뉴스(Naver)를 멱등(idempotent) 수집하여 DuckDB(`raw_collection.duckdb`)에 적재한다. |
 
 세부 항목:
 
@@ -130,7 +130,6 @@ flowchart LR
 | FR-01.2 | (재무) | `RAW_FINANCIAL` → `FINANCIAL_WIDE` 요약(현금성자산 + 단기예금/정기예금 계정 합산 → `cash_amount`). 이중적재 lineage(RAW + WIDE) 보존. |
 | FR-01.3 | Track A | ECOS 기준금리·BSI, FinanceDataReader 지수 → `RAW_MACRO`(PK `(METRIC_CODE, DATE)`). |
 | FR-01.4 | Track B | Naver 뉴스 API → `RAW_NEWS`(원천만, PK `NEWS_HASH`). |
-| FR-01.5 | Track C | BigKinds 뉴스 → `RAW_NEWS`(BigKinds 우선 dedup). |
 
 > **원천/가공 분리:** `RAW_NEWS`는 원천 뉴스(`NEWS_HASH` PK)만 담는다. 감성 점수 등 가공 산출물은 enrich 단계의 `COMPANY_SENTIMENT`로 분리한다(FR-03). 과거의 `RAW_NEWS.GEMINI_SCORE` 인라인 컬럼은 폐기한다.
 
@@ -163,7 +162,7 @@ flowchart LR
 
 | 하위 ID | 내용 |
 |---|---|
-| FR-03.1 | refine 단계: 유사뉴스 dedup(Kiwi 키워드, BigKinds 우선)으로 중복 제거. `RAW_NEWS`(원천)는 변경하지 않는다. |
+| FR-03.1 | refine 단계: 유사뉴스 dedup(Kiwi 키워드)으로 중복 제거. `RAW_NEWS`(원천)는 변경하지 않는다. |
 | FR-03.2 | enrich 단계: Gemini 감성 점수 $\in[-1,1]$ 와 confidence $\in[0,1]$ 를 산출해 `COMPANY_SENTIMENT`에 적재(키 `(TARGET_ID, base_ym)`, `TARGET_ID = corp_code`). |
 | FR-03.3 | confidence는 검증셋 기반 캘리브레이션(reliability)을 통과한 값만 BL Ω에 사용. **하드코딩(0.85/0.65 등) 금지.** |
 
@@ -335,7 +334,6 @@ $$
 | 한국은행 ECOS (금리·BSI) | Track A | 월/일 | `METRIC_CODE`+`DATE` | `RAW_MACRO` | PK 중복 없음, 결측 보간 규칙 명시 |
 | FinanceDataReader (지수) | Track A | 일 | `METRIC_CODE`+`DATE` | `RAW_MACRO` | 영업일 정렬, 결측 일자 처리 |
 | Naver 뉴스 API | Track B | 일 | `NEWS_HASH` | `RAW_NEWS`(원천) | dedup, `PUB_DATE` 파싱 검증 |
-| BigKinds 뉴스 | Track C | 일 | `NEWS_HASH` | `RAW_NEWS`(원천) | BigKinds 우선 dedup |
 | (파생) Gemini 감성 | enrich | 뉴스 갱신 시 | `(TARGET_ID, base_ym)` | `COMPANY_SENTIMENT`(가공) | 점수 $\in[-1,1]$, confidence 캘리브레이션 통과 |
 | (파생) ML 스코어 | models | 배치 시 | `corp_code`(→crosswalk) | `ML_PREDICTIONS` | `as_of_date` 부여, 시점 분리 검증, 결합키=`corp_code` |
 | (마스터) 기업 유니버스 | universe | 분기/필요시 | `TARGET_ID`(=`corp_code`) 및 4종 ID | `TARGET_MASTER` | TIER 분류율·UNKNOWN 임계 준수 |
@@ -359,7 +357,6 @@ $$
 | | T3 | 가상 섹터 노드(`IS_VIRTUAL`) |
 | Track(수집축) | A | 매크로(ECOS 금리·BSI, FDR 지수) |
 | | B | Naver 뉴스 |
-| | C | BigKinds 뉴스 |
 
 ### 5.4 핵심 엔티티 관계
 
@@ -432,7 +429,7 @@ erDiagram
 | ID | 제약 |
 |---|---|
 | C-01 | **No-Crawl 원칙**: 웹 크롤링을 배제하고 안정적 공공 API/공식 데이터셋만 사용한다(IP 차단·법적 리스크 회피). |
-| C-02 | **공공 API 쿼터**: DART/ECOS/Naver/BigKinds의 호출 한도를 준수한다(레이트 리밋·백오프, 부분 실패 허용). |
+| C-02 | **공공 API 쿼터**: DART/ECOS/Naver의 호출 한도를 준수한다(레이트 리밋·백오프, 부분 실패 허용). |
 | C-03 | **pickle 금지**: 직렬화는 DuckDB/Parquet/안전한 모델 포맷만 사용(버전취약·임의코드실행 위험). |
 | C-04 | **시크릿 외부화**: API 키 평문 노출 금지(환경변수/시크릿매니저, 로그 마스킹). |
 | C-05 | **Colab/Drive 종속 금지**: 모든 경로는 `.env`/pydantic-settings로 주입한다. |

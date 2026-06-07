@@ -1,5 +1,5 @@
 - 문서명: BL 데이터 파이프라인 설계서 (Data Pipeline Design)
-- 버전: v0.2
+- 버전: v0.3
 - 작성일: 2026-06-07
 - 상태: Draft
 - 작성주체: 데이터사이언스팀
@@ -40,7 +40,7 @@
 
 # 1. 소스 인벤토리 (Source Inventory)
 
-BL은 6개 데이터 출처를 결합한다. 모든 외부 출처는 **공식 API/공공데이터**만 사용하며, 비공식 HTML 크롤링은 금지한다(IP 차단·법적 리스크·재현성 저하 회피, [01 아키텍처 §2.3](./01-system-architecture.md) No-Crawl 우선).
+BL은 5개 데이터 출처(OpenDART·ECOS·FinanceDataReader·Naver·내부 post_data)를 결합하고, 뉴스 감성은 Gemini로 enrich한다. 모든 외부 출처는 **공식 API/공공데이터**만 사용하며, 비공식 HTML 크롤링은 금지한다(IP 차단·법적 리스크·재현성 저하 회피, [01 아키텍처 §2.3](./01-system-architecture.md) No-Crawl 우선).
 
 ## 1.1 소스 요약 표
 
@@ -50,7 +50,6 @@ BL은 6개 데이터 출처를 결합한다. 모든 외부 출처는 **공식 AP
 | **한국은행 ECOS** | A 매크로(금리·BSI) | `GET https://ecos.bok.or.kr/api/StatisticSearch/...` (기준금리 `722Y001`, KTB3Y `817Y002`, BSI 등) | 월/일 | `(METRIC_CODE, DATE)`(PK) | 일 약 10,000건(키당, 정책 변동) | `RAW_MACRO` | 예(공식 API) |
 | **FinanceDataReader** | A 매크로(지수·주가) | `fdr.DataReader('KS11'/stock_code, start, end)` (KOSPI/KOSDAQ 지수, 상장사 주가) | 일 | `stock_code`/지수심볼 + `DATE` | 라이브러리(공개 데이터, 별도 한도 없음) | `RAW_MACRO`(지수), 상장지표 | 예(라이브러리) |
 | **Naver 뉴스 API** | B 뉴스 | `GET https://openapi.naver.com/v1/search/news.json` (헤더 `X-Naver-Client-Id/Secret`, `query`, `display`, `start`, `sort`) | 일/주 | `NEWS_HASH`(PK, 멱등), `TARGET_ID`(corp_code 귀속은 `SEARCH_KEYWORDS` 경유) | 일 약 25,000건(앱당, 정책 변동) | `RAW_NEWS`(`SOURCE='naver'`) | 예(공식 API) |
-| **BigKinds** | C 뉴스 | 한국언론진흥재단 뉴스 검색 API(기관 발급키) | 일/주 | `NEWS_HASH`(PK, 멱등), `TARGET_ID`(corp_code 귀속은 `SEARCH_KEYWORDS` 경유) | 계약 한도(기관별, 실측 확정 필요) | `RAW_NEWS`(`SOURCE='bigkinds'`) | 예(공식 API) |
 | **post_data(내부)** | 내부 보유/거래 | 내부 DB/CSV 적재(접근통제). 과거 `post_owned_set` PLACEHOLDER | 월/배치 | `corp_code`(or `jurir_no`) → crosswalk | 내부 | `POST_RAW`→`post_data_panel`, `POST_OWNED_CORPS` | 내부(크롤 무관) |
 | **Google Gemini** | enrich(감성) | `2.5 Flash-Lite` 생성 API(뉴스 텍스트→감성·confidence) | 신규 뉴스 배치 | `NEWS_HASH`→`TARGET_ID` | 토큰·RPM 한도(요금제 변동) | `COMPANY_SENTIMENT` | N/A(LLM) |
 
@@ -58,7 +57,7 @@ BL은 6개 데이터 출처를 결합한다. 모든 외부 출처는 **공식 AP
 > - **재무 수집 전환**: 과거 `OpenDartReader.finstate_all`은 `status='013'`(데이터 없음) + 내부 예외로 실사용 불가 판정되어, **REST 직접 호출**(`fnlttSinglAcntAll.json`)로 전환했다. `status='000'`이고 `list`가 비어 있지 않을 때만 적재한다(빈 응답을 0으로 오해하는 결함 차단).
 > - **뉴스 적재 단위·식별자**: 뉴스의 적재/멱등(dedup) 키는 **`NEWS_HASH`** 다(`TARGET_ID`가 아님). `TARGET_ID`는 `RAW_NEWS`에서 `TARGET_MASTER`로의 FK이며, **검색키워드 컬럼은 `SEARCH_KEYWORDS`**(별개)다. 검색키워드→`TARGET_ID`(=`corp_code`) 귀속 규칙·게이트는 §2.1 `ingest.news` 계약과 §7.1에 정의한다(동명 법인·노이즈 기사 오귀속 위험 통제).
 > - **쿼터·한도(미검증 단정 금지)**: 위 쿼터 수치는 모두 **공개기준 추정값**이며 키 등급·정책 변경·계약에 따라 달라진다. 레이트리밋 설계는 실측 확정 전까지 보수적으로 운용하고, 정확 수치는 §10 오픈이슈(API 쿼터 실측 확정)로 둔다.
-> - **시크릿**: OpenDART `crtfc_key`, ECOS 키, Naver `Client-Id/Secret`, BigKinds 키, Gemini 키는 모두 **환경변수/Secret Manager**로만 주입(평문 금지). 로그 출력 시 자동 마스킹([01 아키텍처 §8.2](./01-system-architecture.md)).
+> - **시크릿**: OpenDART `crtfc_key`, ECOS 키, Naver `Client-Id/Secret`, Gemini 키는 모두 **환경변수/Secret Manager**로만 주입(평문 금지). 로그 출력 시 자동 마스킹([01 아키텍처 §8.2](./01-system-architecture.md)).
 > - **레이트리밋·재시도**: 모든 API 클라이언트는 지수 백오프(exponential backoff)·최대 재시도·쿼터 가드를 둔다. 부분 실패는 데드레터 테이블 `DEAD_LETTER`로 분리 적재하여 silent drop을 금지한다(§7.3).
 > - **public demo**: GitHub Pages 데모는 외부 키 없이 **합성 샘플데이터**만 사용한다.
 
@@ -66,15 +65,14 @@ BL은 6개 데이터 출처를 결합한다. 모든 외부 출처는 **공식 AP
 
 | Tier | 정의 | 주력 소스 |
 | --- | --- | --- |
-| **T1** 상장·외감 | `stock_code` 보유, DART 재무 충실 | OpenDART(재무), FDR(주가/지수), Naver/BigKinds(뉴스) |
-| **T2** 비상장·중소 | 재무 공시 제한적 | OpenDART(가용분), Naver/BigKinds(대안 신호 우선) |
+| **T1** 상장·외감 | `stock_code` 보유, DART 재무 충실 | OpenDART(재무), FDR(주가/지수), Naver(뉴스) |
+| **T2** 비상장·중소 | 재무 공시 제한적 | OpenDART(가용분), Naver(대안 신호 우선) |
 | **T3** 가상 섹터 노드(`IS_VIRTUAL=True`) | 업종 대표 가상 자산 | ECOS/FDR(매크로·섹터), 집계 신호 |
 
 | Track | 소스 | 적재 테이블 |
 | --- | --- | --- |
 | **A 매크로** | ECOS(기준금리·BSI), FDR(지수) | `RAW_MACRO` |
 | **B 뉴스** | Naver 뉴스 API | `RAW_NEWS` (`SOURCE='naver'`) |
-| **C 뉴스** | BigKinds | `RAW_NEWS` (`SOURCE='bigkinds'`, dedup 우선 소스) |
 
 ---
 
@@ -93,7 +91,6 @@ flowchart LR
     ECOS[ECOS]
     FDR[FDR]
     NAVER[Naver]
-    BIGK[BigKinds]
     POST[post_data]
     GEM[Gemini]
   end
@@ -114,7 +111,6 @@ flowchart LR
   ECOS --> IN_M
   FDR --> IN_M
   NAVER --> IN_N
-  BIGK --> IN_N
   POST --> FE
   GEM --> EN
 
@@ -139,8 +135,8 @@ flowchart LR
 | 0 | **universe** | T1/T2/T3 타겟 마스터 구성·복원, crosswalk 채움. T3는 가상 섹터 노드. | DART `corpCode.xml`/`company.json`, ML·감성·재무 후보(FULL OUTER JOIN → `TMP_T1_CANDIDATES`) | `TARGET_MASTER`, `ID_CROSSWALK`, `TARGET_CALENDAR`(자산×`base_ym` 시점 그리드) | `corp_code` 정렬, `INSERT OR REPLACE` | TARGET_MASTER, 01, 09 |
 | 1 | **ingest.financial** | OpenDART REST 재무 적재(이중적재). | `corp_code` 리스트, `bsns_year`, `reprt_code=11011`, `fs_div` | `RAW_FINANCIAL`(계정단위), `FINANCIAL_WIDE`(기업·연도 요약+`cash_amount`) | `(TARGET_ID,ACCOUNT_ID,PERIOD)` 키, `FULL_REBUILD`/`ONLY_EMPTY` 플래그, **재공시 정정 감지 재적재**(§6.3) | 01 |
 | 1 | **ingest.macro** | ECOS·FDR 매크로/지수 적재(Track A). | `METRIC_CODE`, `DATE` 범위 | `RAW_MACRO` | `(METRIC_CODE,DATE)` 키, upsert | 02 |
-| 1 | **ingest.news** | Naver(B)·BigKinds(C) 뉴스 적재 + **키워드→`TARGET_ID`(corp_code) 귀속**. | `SEARCH_KEYWORDS`(TARGET별), 기간 | `RAW_NEWS`(+`match_confidence`) | `NEWS_HASH` 키(멱등), keyset 페이지네이션, **결정적 키워드 매칭 규칙**(§7.1 오귀속 게이트) | 03, 04 |
-| 2 | **refine** | 유사뉴스 dedup(BigKinds 우선), Kiwi 키워드 추출. | `RAW_NEWS` | `NEWS_REFINED` | 결정적 dedup(해시+정렬키) | 05 |
+| 1 | **ingest.news** | Naver(B) 뉴스 적재 + **키워드→`TARGET_ID`(corp_code) 귀속**. | `SEARCH_KEYWORDS`(TARGET별), 기간 | `RAW_NEWS`(+`match_confidence`) | `NEWS_HASH` 키(멱등), keyset 페이지네이션, **결정적 키워드 매칭 규칙**(§7.1 오귀속 게이트) | 03 |
+| 2 | **refine** | 유사뉴스 dedup, Kiwi 키워드 추출. | `RAW_NEWS` | `NEWS_REFINED` | 결정적 dedup(해시+정렬키) | 05 |
 | 3 | **enrich** | Gemini 2.5 Flash-Lite 감성 + confidence **캘리브레이션**. | `NEWS_REFINED` | `COMPANY_SENTIMENT`(`sentiment_score`, `event_cnt`, `confidence`) | confidence 하드코딩 금지, `NEWS_HASH` 멱등 | 06 |
 | 4 | **features** | 시점분리 시계열·재무·매크로·감성 피처 + 라벨. crosswalk 경유 결합. | `FINANCIAL_WIDE`, `RAW_MACRO`, `COMPANY_SENTIMENT`, `POST_RAW`, `TARGET_CALENDAR`, `ID_CROSSWALK` | `post_data_panel`(통합 PIT 패널), `train_set.parquet`, `inference_set.parquet` | ASOF JOIN(좌변=`TARGET_CALENDAR`), `bal_future_*` 피처 차단, 고정 스케일러 | 07 |
 | 5 | **models** | XGBoost(성장/이탈)·IsolationForest(이상). 시점분리 검증. | `train_set`/`inference_set` | `ML_PREDICTIONS`(`growth_score_xgb`, `prob_growth_raw`, `prob_churn_raw`, `anomaly_score_if`, `as_of_date`) | walk-forward, train-fit 스케일러 재사용 | 08 |
@@ -148,7 +144,7 @@ flowchart LR
 | 7 | **bl_optimize** | 사후 $E[R]$, 최적가중 $w^*$ 산출. | `bl_input_data` | `bl_result.parquet`(`bl_return`, `target_weight`, `weight_diff`) | **cvxpy(볼록 QP)=전역최적 결정적**; **비볼록(최대 Sharpe/IR) SLSQP는 시드·초기값($x_0=w_{hybrid}$)·다중시작 시드 고정으로 결정성 확보**([03 BL §7.3](./03-bl-model-design.md)), 정상범위 검증 | 10 |
 | 8 | **serve** | 마케터용 마트·외부 JSON 생성. | `bl_result`, `ML_PREDICTIONS`, `COMPANY_SENTIMENT`, `post_data_panel` | `bl_dashboard_mart.parquet`, `*.json` | HTML/데이터 분리, 라벨 단일소스, **별칭 매핑(§3.2.3)** | 11 / 11-1 |
 
-> 비고: 과거 노트북 명칭은 `01_collect`, `02_track_A`, `03_track_B`, `04_track_C`, `05_유사뉴스_정제`, `06_gemini_처리`, `07_학습데이터_전처리`, `08_모델학습`, `09_BL_input_전처리`, `10_BL 모델 최적화`, `11_대시보드`에 대응한다. 격상판은 로직을 `src/bl/` 패키지로 이전하고 노트북은 얇은 호출자로만 둔다.
+> 비고: 과거 노트북 명칭은 `01_collect`, `02_track_A`, `03_track_B`, `04_track_C`(격상판 제외: BigKinds 폐쇄적 API), `05_유사뉴스_정제`, `06_gemini_처리`, `07_학습데이터_전처리`, `08_모델학습`, `09_BL_input_전처리`, `10_BL 모델 최적화`, `11_대시보드`에 대응한다. 격상판은 로직을 `src/bl/` 패키지로 이전하고 노트북은 얇은 호출자로만 둔다.
 
 ---
 
@@ -176,7 +172,7 @@ BL 유니버스의 메인 키 테이블. T1/T2/T3 전 타겟을 담는다.
 | `SECTOR_CODE` | VARCHAR | FK→섹터 | 업종/섹터 코드(예 `64121`=은행) |
 | `induty_code` | VARCHAR | | DART 업종코드 |
 | `adres`,`phn_no`,`fax_no`,`hm_url`,`est_dt` | VARCHAR | | 기업개황(`company.json`) |
-| `SEARCH_KEYWORDS` | VARCHAR | | 뉴스 검색키워드(Track B/C). `TARGET_ID`와 별개 컬럼 |
+| `SEARCH_KEYWORDS` | VARCHAR | | 뉴스 검색키워드(Track B). `TARGET_ID`와 별개 컬럼 |
 | `LAST_COLLECTED`,`CREATED_AT` | TIMESTAMP | | 수집 메타 |
 
 ### 3.1.2 `RAW_FINANCIAL` (원천 재무, 이중적재 RAW측)
@@ -225,7 +221,7 @@ DART 계정 단위 원천. 보존 강점인 RAW+WIDE 이중적재 lineage의 RAW
 | `FREQ` | VARCHAR | ENUM(D/M) | 주기 |
 | `COLLECTED_AT` | TIMESTAMP | | |
 
-### 3.1.5 `RAW_NEWS` (원천 뉴스, Track B/C)
+### 3.1.5 `RAW_NEWS` (원천 뉴스, Track B)
 
 | 컬럼 | 타입 | 키/제약 | 설명 |
 | --- | --- | --- | --- |
@@ -234,7 +230,7 @@ DART 계정 단위 원천. 보존 강점인 RAW+WIDE 이중적재 lineage의 RAW
 | `match_confidence` | DOUBLE | [0,1] | 키워드→`TARGET_ID` 귀속 신뢰도(동명·노이즈 통제, §7.1) |
 | `TITLE`,`DESCRIPTION` | VARCHAR | | 제목/요약 |
 | `PUB_DATE` | TIMESTAMP | | 발행시점(시점정합 핵심) |
-| `SOURCE` | VARCHAR | ENUM(naver/bigkinds) | dedup 시 bigkinds 우선 |
+| `SOURCE` | VARCHAR | ENUM(naver) | 뉴스 출처(Naver) |
 | `URL` | VARCHAR | | 원문 링크 |
 | `COLLECTED_AT` | TIMESTAMP | | |
 
@@ -859,7 +855,7 @@ sequenceDiagram
 | 4 | 합성 샘플데이터 생성 | 분포 보존 합성(공개 데모용), PII 미포함([05 대시보드](./05-dashboard-design.md)) |
 | 5 | crosswalk 초기 적재·갱신 주기 | DART 원천 기반 1차 적재 + `as_of_date` 갱신 운영([ADR-0003](./adr/ADR-0003-identifier-mapping.md)) |
 | 6 | UNKNOWN 임계치 실측 확정 | 잠정 5%(§4.3) → 초기 적재 후 캘리브레이션으로 재확정. 03 로드맵·PRD와 동기화 |
-| 7 | API 쿼터 실측 확정 | OpenDART/ECOS/Naver/BigKinds 실 한도·키 등급별 한도 실측, 레이트리밋 설계 반영(§1.1) |
+| 7 | API 쿼터 실측 확정 | OpenDART/ECOS/Naver 실 한도·키 등급별 한도 실측, 레이트리밋 설계 반영(§1.1) |
 | 8 | `event_type` ENUM 도메인 확정 | enrich 추출 규칙·허용값 집합 검증(§3.1.6) |
 | 9 | `Q_final` 단위 정의 확정 | σ 배수 vs 절대 log-return 단위 확정 후 pandera 범위·[03 BL §5.2] 동기화(§7.2) |
 

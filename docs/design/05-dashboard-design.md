@@ -1,5 +1,5 @@
 - 문서명: BL 대시보드·배포 설계서 (Dashboard & Deployment Design)
-- 버전: v0.2
+- 버전: v0.3
 - 작성일: 2026-06-07
 - 상태: Draft
 - 작성주체: 데이터사이언스팀 (테크니컬 라이터)
@@ -335,7 +335,7 @@ fig.update_layout(template="plotly_dark", paper_bgcolor="#0b0e14",
   "turnover": 0.214,                  // REBALANCE Δ 사전집계(Σ|Δw|/2)
   "env": "demo",
   "generated_at": "2026-06-07T09:00:00+09:00",
-  "data_provenance": "synthetic(분포 근사, 원천 구조 모사: DART/ECOS/FinanceDataReader/Naver/BigKinds/Gemini)"
+  "data_provenance": "synthetic(분포 근사, 원천 구조 모사: DART/ECOS/FinanceDataReader/Naver/Gemini)"
 }
 ```
 

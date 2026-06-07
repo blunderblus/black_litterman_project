@@ -1,7 +1,7 @@
 - 문서명: ADR-0002 저장 포맷 결정
 - 번호: ADR-0002
 - 제목: 저장을 DuckDB + Parquet로 표준화하고 pickle 폐기
-- 버전: v0.2
+- 버전: v0.3
 - 작성일: 2026-06-07
 - 상태: Accepted
 - 결정자: BL 아키텍트
@@ -9,7 +9,7 @@
 
 ## 맥락(Context)
 
-BL의 데이터 파이프라인은 universe(TARGET_MASTER) → ingest(재무 DART / macro ECOS / news Naver+BigKinds) → refine → enrich(Gemini 감성) → features → models → bl_inputs → bl_optimize → serve의 단계로 구성된다. 각 단계는 정형 테이블(재무·매크로·피처·BL 입력)과 중간 산출물(학습된 스케일러·모델·캘리브레이션 파라미터)을 저장·교환해야 한다.
+BL의 데이터 파이프라인은 universe(TARGET_MASTER) → ingest(재무 DART / macro ECOS / news Naver) → refine → enrich(Gemini 감성) → features → models → bl_inputs → bl_optimize → serve의 단계로 구성된다. 각 단계는 정형 테이블(재무·매크로·피처·BL 입력)과 중간 산출물(학습된 스케일러·모델·캘리브레이션 파라미터)을 저장·교환해야 한다.
 
 과거 토이 프로젝트는 Colab/Drive 환경에서 다음과 같이 저장을 수행했고, 여러 결함이 누적되었다.
 

@@ -1,5 +1,5 @@
 - 문서명: 프로젝트 개요 및 비전 (Project Overview & Vision)
-- 버전: v0.2
+- 버전: v0.3
 - 작성일: 2026-06-07
 - 상태: Draft
 - 작성주체: 수석 데이터 사이언티스트 / 테크니컬 라이터
@@ -26,7 +26,7 @@
 | 문제 | 현상 | 결과 |
 |---|---|---|
 | 예금 이탈 위기 | 금리 상승기·경쟁사 프로모션 시 대형 법인 자금 이동 | 잔액 급감, 조달비용 압박 |
-| 데이터 파편화 | 재무(DART), 매크로(ECOS), 뉴스(Naver/BigKinds), 내부 거래 데이터가 각기 다른 사일로에 산재 | 고객 360도 뷰 부재, 신호 통합 불가 |
+| 데이터 파편화 | 재무(DART), 매크로(ECOS), 뉴스(Naver), 내부 거래 데이터가 각기 다른 사일로에 산재 | 고객 360도 뷰 부재, 신호 통합 불가 |
 | 경험 의존 영업 | RM 개인의 감(感)과 관계에 의존, 자원 배분이 비정형·비재현적 | 우선순위 오판, 한정된 영업력의 비효율 배분 |
 | 사후 대응 | 이탈 "발생 후" 인지 | 방어 골든타임 상실 |
 
@@ -119,7 +119,7 @@ $$
 세분화 축은 다음과 같다.
 
 - **Tier(고객축)**: T1 상장 외감 / T2 비상장 중소 / T3 가상 섹터 노드(IS_VIRTUAL=true)
-- **Track(수집축)**: A 매크로(한국은행 ECOS 금리·BSI, FinanceDataReader 지수) / B Naver 뉴스 / C BigKinds 뉴스
+- **Track(수집축)**: A 매크로(한국은행 ECOS 금리·BSI, FinanceDataReader 지수) / B Naver 뉴스
 
 ---
 
@@ -154,7 +154,7 @@ GPU 유무는 **연산자원 활용(속도)만** 좌우한다. 배열 모듈을 
 ### 5.1 In Scope
 
 - 고객 유니버스 정의(TARGET_MASTER)와 **명시적 ID crosswalk**(corp_code · biz_reg_no · jurir_no · stock_code 매핑)
-- 재무(DART) / 매크로(ECOS) / 뉴스(Naver, BigKinds) 수집·적재(DuckDB) 및 뉴스 dedup·정제
+- 재무(DART) / 매크로(ECOS) / 뉴스(Naver) 수집·적재(DuckDB) 및 뉴스 dedup·정제
 - Gemini 뉴스 감성 enrich + confidence 캘리브레이션
 - 시점 분리된 피처/라벨 생성, XGBoost·Isolation Forest 학습(누수 차단)
 - BL 입력 구성($\Sigma, \Pi, P, Q, \Omega, w_{mkt}, \tau, \lambda$)과 BL 최적화(사후수익·최적 가중치)
@@ -222,7 +222,6 @@ flowchart TD
         FIN["재무 DART"]
         MAC["매크로 ECOS / FDR<br/>(Track A)"]
         NB["뉴스 Naver (Track B)"]
-        NC["뉴스 BigKinds (Track C)"]
     end
     subgraph PROC["정제·증강"]
         REF["refine<br/>뉴스 dedup"]
@@ -242,9 +241,8 @@ flowchart TD
         PAGES["GitHub Pages<br/>(합성 데모)"]
     end
 
-    UM --> FIN & MAC & NB & NC
+    UM --> FIN & MAC & NB
     NB --> REF
-    NC --> REF
     REF --> ENR
     FIN --> FEAT
     MAC --> FEAT
@@ -265,7 +263,7 @@ flowchart TD
     BL -.-> STORE
 ```
 
-저장은 DuckDB(수집/적재/OLAP)와 Parquet(분석/교환)로 일원화하고 pickle은 폐기한다. 코드는 `src/bl/` 레이아웃의 재사용 패키지로 재구성한다(`import bl`). 노트북 번호 대응(핵심 11계열): 01 재무, 02 Track A, 03 Track B, 04 Track C, 05 뉴스정제, 06 Gemini, 07 전처리, 08 모델학습, 09 BL입력, 10 BL최적화, 11/11-1 대시보드. 이 외에 유니버스·보정 노트북 2개(TARGET_MASTER, 학습_전_데이터보정)가 별도로 있어 과거 노트북은 총 13개다(번호 체계 보존, 매핑 상세는 [로드맵 §과거 노트북↔모듈 매핑](03-roadmap.md)). 상세 아키텍처는 [시스템 아키텍처](../design/01-system-architecture.md) 참조.
+저장은 DuckDB(수집/적재/OLAP)와 Parquet(분석/교환)로 일원화하고 pickle은 폐기한다. 코드는 `src/bl/` 레이아웃의 재사용 패키지로 재구성한다(`import bl`). 노트북 번호 대응(핵심 11계열): 01 재무, 02 Track A, 03 Track B, 04 Track C(격상판 제외: BigKinds 폐쇄적 API), 05 뉴스정제, 06 Gemini, 07 전처리, 08 모델학습, 09 BL입력, 10 BL최적화, 11/11-1 대시보드. 이 외에 유니버스·보정 노트북 2개(TARGET_MASTER, 학습_전_데이터보정)가 별도로 있어 과거 노트북은 총 13개다(번호 체계 보존, 매핑 상세는 [로드맵 §과거 노트북↔모듈 매핑](03-roadmap.md)). 상세 아키텍처는 [시스템 아키텍처](../design/01-system-architecture.md) 참조.
 
 ---
 
@@ -313,7 +311,7 @@ flowchart TD
 - $\Omega \propto 1/DRI^2$: 데이터 빈약 고객의 뷰를 불신하는 BL Ω 의미론 정합
 - DuckDB 네이티브 처리(ASOF JOIN · 멱등 upsert)
 - 이중적재 lineage(RAW_FINANCIAL + FINANCIAL_WIDE)
-- 도메인 특화 뉴스 처리(Kiwi 키워드 · BigKinds 우선 dedup)
+- 도메인 특화 뉴스 처리(Kiwi 키워드 · 결정적 뉴스 dedup)
 - 재무 유무 2그룹 모델링
 
 ---
