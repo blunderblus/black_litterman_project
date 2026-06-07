@@ -114,4 +114,24 @@ demo 데이터에서 λ를 스윕하며 기본 τ=0.05의 앵커 사후기여(pr
 본 작업은 메인 트리에서 **병렬 세션의 E2 작업(anomaly 축→Ω 신뢰도 변조)이 진행 중**이어서, 충돌
 방지를 위해 격리 worktree(`c3-lambda-normalization`, HEAD `1e7d6a6` 기준)에서 수행함. C3와 E2는
 `inputs.py` 헤더/metadata·`docs/design/03`·`README` 일부 영역이 겹치므로 **머지 시 충돌 해결 필요**.
-메인 트리의 stash(`E2-WIP-anomaly-to-omega`)와 `_scratch/`(E2 비교 하니스)는 C3와 무관한 E2 자산임.
+
+## 9. 머지 완료 — E2+C3 결합 실측 (main)
+
+E2(`e850a5f`) FF 후 C3(`c9e6d73`)를 3-way 머지(merge commit). 충돌은 `inputs.py`(헤더·상수·metadata)·
+`tests/test_inputs.py`(헤더) 뿐이었고 **전부 keep-both로 해결**(E2의 3축·γ_anom·Ω변조 + C3의 Π정규화·
+LAMBDA_FIXED·lambda_effective 공존). 결합 검증: **pytest 122 pass · ruff/mypy clean · demo 정상**(λ=0.25·γ_anom=2.0).
+
+**중요 — 결합 시 보수성 가중(운영 판단 필요):** E2·C3 둘 다 뷰를 prior로 후퇴시키는 규제라, 결합 BL이
+합성 positive-control에서 보수적으로 수렴한다.
+
+| 지표 | C3 단독(λ=0.25) | E2 단독(README, λ→1.0) | **결합 E2+C3(main)** |
+| --- | --- | --- | --- |
+| mean_ret_bl | +2.49% | +7.2%(미정밀) | **−0.1%(≈0)** |
+| lift vs naive | +14.72%p | ~+19.4%p | **+12.09%p** |
+| mean_IC | +0.330 | +0.32 | **+0.322** |
+| ir_bl | +0.564 | ~2.0 | **−0.035** |
+| win_rate | 100% | 100% | **100%** |
+
+γ_anom 스윕(결합): γ=0 lift +0.149(최대, E2의 "anomaly 방향알파 없음" 결합서도 확인)·γ=1 +0.134·**γ=2 +0.120(기본)**·γ=4 +0.101. IC 0.327→0.298 단조. → 가치가 "절대 초과수익"에서 **"하방 회피(naive −12.2% 손실 회피)+신호 보존(IC +0.32)"**으로 이동. 결합 보수성(γ_anom=2·λ_fix=0.25)이 과한지는 **운영 정책 판단**이며 동일 백테스트로 재캘리브레이션 가능.
+
+(머지 정리: 임시 stash·`_scratch/`·`_c3/`·worktree는 정리함.)
