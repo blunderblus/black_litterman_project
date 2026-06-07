@@ -29,7 +29,7 @@
 | 경계 함수 | `get_array_module(*arrays)` · `asarray(x)`(호스트→디바이스) · `asnumpy(x)`(디바이스→호스트) |
 | 자동감지·폴백 | CUDA 런타임·CuPy import·디바이스 가용성 3단 체크. 실패 시 **무중단 CPU 폴백** |
 | 기본 dtype | **float64**(BL 역행렬·조건수 안정성 우선). GPU에서도 float32로 정밀도를 깎지 않음 |
-| 수치 일치 계약 | CPU/GPU 결과 상대오차 $<10^{-8}$(`rtol`, 모든 산출물 $\Sigma$·$E[R]$·$w^\*$ 공통) 회귀테스트로 강제. 표준 사실관계(상대오차 $<10^{-8}$)를 권위로 채택하며, [ADR-0001](./adr/ADR-0001-compute-backend.md)의 예시값 `rtol=1e-6`은 본 격상판에서 $10^{-8}$로 **강화**한다(근거: §1.1·§8.4) |
+| 수치 일치 계약 | CPU/GPU 결과 상대오차 $<10^{-8}$(`rtol`, 모든 산출물 $\Sigma$·$E[R]$·$w^*$ 공통) 회귀테스트로 강제. 표준 사실관계(상대오차 $<10^{-8}$)를 권위로 채택하며, [ADR-0001](./adr/ADR-0001-compute-backend.md)의 예시값 `rtol=1e-6`은 본 격상판에서 $10^{-8}$로 **강화**한다(근거: §1.1·§8.4) |
 | GPU 이득 구간 | full 공분산 $S$($O(N^2 T)$), eigh·사후 좌변 GEMM·단일 선형해($O(N^3)$), 최적화 반복 목적평가 |
 | out-of-core | 디바이스 초과=GEMM 입력 블록화(결과 $S$는 호스트 in-core), 호스트도 초과=팩터구조 $\Sigma=B\Sigma_fB^\top+D$로 dense $S$ 미형성. 입력 패널은 DuckDB+Parquet 스트리밍([ADR-0002](./adr/ADR-0002-storage-format.md)). 상세 §5.3 |
 
@@ -41,7 +41,7 @@
 
 ### 1.1 목표
 
-1. **수치 동등성(numerical parity)**: 동일 입력·동일 설정에서 CPU 경로와 GPU 경로의 산출물($\Sigma$, $E[R]$, $w^\*$)이 부동소수 허용오차 내 동일하다. 백엔드는 *성능* 차원이지 *결과* 차원이 아니다. **허용오차 단일 기준은 상대오차 $\text{rtol}<10^{-8}$**(표준 사실관계)이며, 모든 산출물에 동일하게 적용한다.
+1. **수치 동등성(numerical parity)**: 동일 입력·동일 설정에서 CPU 경로와 GPU 경로의 산출물($\Sigma$, $E[R]$, $w^*$)이 부동소수 허용오차 내 동일하다. 백엔드는 *성능* 차원이지 *결과* 차원이 아니다. **허용오차 단일 기준은 상대오차 $\text{rtol}<10^{-8}$**(표준 사실관계)이며, 모든 산출물에 동일하게 적용한다.
 
    > **rtol 단일화 주석**: [ADR-0001](./adr/ADR-0001-compute-backend.md)은 결정문·후속작업에 예시값 `rtol=1e-6`을 명시했으나, 본 격상판은 표준 사실관계(CPU/GPU 상대오차 $<10^{-8}$)와 [03 §7.4](./03-bl-model-design.md)·[02 파이프라인](./02-data-pipeline.md)에 맞춰 $10^{-8}$로 통일·강화한다(ADR-0001은 이 값으로 개정 예정). 다만 float64 누산순서 차이는 연산종류·행렬크기에 따라 분포가 다르므로, 회귀테스트는 연산종류별 `rtol`/`atol`을 분리 적용한다(§8.4 표). 단일 스칼라 비트동일이 아니라 **연산별 허용오차 내 동일**이 계약이다.
 2. **단일 코드베이스**: 연산 로직은 한 번만 작성한다. `numpy`/`cupy`를 직접 import하지 않고 `xp` 추상화에만 의존한다(분기 유지보수 비용 최소화).
@@ -284,7 +284,7 @@ flowchart TD
 | H3 | 고유값분해 eigh(고유값 바닥·조건수) | `bl.covariance` | $O(N^3)$ | $N^2$ | **큼** |
 | H4 | 사후 좌변 GEMM $(\tau\Sigma)(P^\top\Omega^{-1}P)$, $P^\top\Omega^{-1}P$ | `bl.optimize` | $O(N^3)$ (대형 GEMM) | $N^2$ | **큼** |
 | H5 | 사후식 단일 선형해 $G\,E[R]=b$, $G=I+(\tau\Sigma)(P^\top\Omega^{-1}P)$ (LU 1회) | `bl.optimize` | $O(N^3)$ 분해 + $O(N^2)$/rhs | $N^2$ | **큼** |
-| H6 | $w^\*$용 사후공분산·PSD계 분해(필요 시 Cholesky) | `bl.optimize` | $O(N^3)$ | $N^2$ | **큼** |
+| H6 | $w^*$용 사후공분산·PSD계 분해(필요 시 Cholesky) | `bl.optimize` | $O(N^3)$ | $N^2$ | **큼** |
 | H7 | 최적화 반복(목적·기울기 평가 내 $w^\top\Sigma_{\text{post}}w$) | `bl.optimize` | 반복당 $O(N^2)$ | $N^2$ | 중간 |
 | H8 | QP 솔버(OSQP/ECOS) 자체 | `bl.optimize` | 솔버 의존 | 희소 | **없음**(CPU) |
 
@@ -327,7 +327,7 @@ def posterior_expected_return(Sigma, Pi, P, Q, Omega, tau):
     return asnumpy(ER)                                    # 호스트 경계 → 저장
 ```
 
-> **역행렬 정책(§7.2와 정합)**: 위 코드는 `inv()`도, `tS_inv_dot(eye)` 식의 밀집 역행렬 생성도 쓰지 않는다. $(\tau\Sigma)$를 곱해 항을 소거하는 재정리만으로 $(\tau\Sigma)^{-1}$ 자체가 사라진다. PSD가 보장되는 대칭계(예: $\Sigma$ 안정화 §7.1, $w^\*$ 산출 시 사후공분산 분해)는 Cholesky+전후치환을 쓰고, 좌변 $G$처럼 비대칭이 될 수 있는 계만 LU를 쓴다. 둘 다 역행렬 명시 생성은 하지 않는다.
+> **역행렬 정책(§7.2와 정합)**: 위 코드는 `inv()`도, `tS_inv_dot(eye)` 식의 밀집 역행렬 생성도 쓰지 않는다. $(\tau\Sigma)$를 곱해 항을 소거하는 재정리만으로 $(\tau\Sigma)^{-1}$ 자체가 사라진다. PSD가 보장되는 대칭계(예: $\Sigma$ 안정화 §7.1, $w^*$ 산출 시 사후공분산 분해)는 Cholesky+전후치환을 쓰고, 좌변 $G$처럼 비대칭이 될 수 있는 계만 LU를 쓴다. 둘 다 역행렬 명시 생성은 하지 않는다.
 >
 > `lu_factor`/`lu_solve`/`solve_triangular`은 CPU=`scipy.linalg.*`, GPU=`cupyx.scipy.linalg.*`로 디스패치한다(§2.3 대응표, §2.4 `solve_triangular` 래퍼 정의 참조). 두 경로 모두 **동일 분해·동일 전후치환** 순서를 따라 수치 일치(rtol $<10^{-8}$)를 보장한다.
 
@@ -414,7 +414,7 @@ def cov_blocked(Rc_host, block, xp, out_S):
 
 - 수익률 패널 $R$의 원천(잔액 시계열)은 호스트 메모리를 초과할 수 있다. **DuckDB가 Parquet을 직접 쿼리·집계**([ADR-0002])하여 필요한 자산·시점 구간만 스트리밍으로 내려받는다.
 - 자산 dedup·정렬·시점필터는 SQL(결정적 `ORDER BY` — 과거 `OFFSET without ORDER BY` 결함 차단, [01 §10])에서 끝내고, 수치 코어에는 정렬·정제된 dense 패널만 전달한다.
-- 산출물($\Sigma$, $E[R]$, $w^\*$)은 `asnumpy` 후 Parquet/DuckDB로 저장(pickle 금지 — [ADR-0002]).
+- 산출물($\Sigma$, $E[R]$, $w^*$)은 `asnumpy` 후 Parquet/DuckDB로 저장(pickle 금지 — [ADR-0002]).
 
 ---
 
@@ -468,7 +468,7 @@ def _eig_floor(Sigma, xp, lam_floor, kappa_max):  # lam_floor/kappa_max는 03 §
 | 방법 | 사용 | 이유 |
 | --- | --- | --- |
 | **사후식 재정리 + 단일 선형해** | 사후 $E[R]$(§4.2) | $(\tau\Sigma)$ 좌곱으로 $(\tau\Sigma)^{-1}$ 자체를 소거 → 역행렬·밀집역행렬 모두 미형성. 좌변 비대칭 가능 → LU 1회 |
-| **Cholesky + 전후치환(solve)** | PSD 대칭계(공분산 안정화 §7.1, $w^\*$ 사후공분산 분해) | 역행렬 명시 생성 없이 풀어 수치오차·폭주를 줄임 |
+| **Cholesky + 전후치환(solve)** | PSD 대칭계(공분산 안정화 §7.1, $w^*$ 사후공분산 분해) | 역행렬 명시 생성 없이 풀어 수치오차·폭주를 줄임 |
 | 직접 역행렬 `inv()` / `(τΣ)^{-1}·I` 밀집 생성 | **금지** | $O(N^3)$+불안정. inv 후 곱·밀집역행렬은 solve보다 오차 증폭(과거 결함과 동급) |
 
 > **자기정합 확인**: §4.2 대표 코드는 위 정책을 준수한다. 이전 v0.1의 `A = tS_inv_dot(xp.eye(N)) + …`는 $(\tau\Sigma)^{-1}$를 항등행렬에 적용해 밀집 역행렬을 materialize했으므로 본 표의 '금지'와 모순이었고, v0.2에서 재정리식으로 제거했다.
@@ -491,7 +491,7 @@ def _eig_floor(Sigma, xp, lam_floor, kappa_max):  # lam_floor/kappa_max는 03 §
 | 사후수익 범위 | $p_{99}(\lvert E[R]\rvert)<5\,\sigma_{\text{mkt}}$ (분위수 기준; $\sigma_{\text{mkt}}=\sqrt{\sigma_{\text{mkt}}^2}$, $\sigma_{\text{mkt}}^2=w_{\text{mkt}}^\top\Sigma\,w_{\text{mkt}}$ — [03 §4.2](./03-bl-model-design.md)) | 빌드 실패(과거 1.29 폭주 회귀 차단) |
 | 백엔드 동치 | CPU↔GPU 상대오차 $<10^{-8}$(§1.1) | 회귀테스트 실패 |
 
-> 게이트 계약 일치: 본문의 "대부분 $<5\sigma_{\text{mkt}}$"(03 §9.4의 분포적 서술)를 **분위수 기준 `p99(|E[R]|) < 5σ_mkt`**(또는 위반비율 $<1\%$)으로 운용화한다. 전수(`all`) 강제는 정상적 꼬리값에서도 빌드를 깨뜨릴 수 있어 채택하지 않는다. $\sigma_{\text{mkt}}$는 **표준편차**이므로 분산 $\sigma_{\text{mkt}}^2=w_{\text{mkt}}^\top\Sigma w_{\text{mkt}}$의 제곱근을 쓴다(변수명에 차원을 드러냄, §8.4 코드 참조).
+> 게이트 계약 일치: 본문의 "대부분 $<5\sigma_{\text{mkt}}$"(03 §9.4의 분포적 서술)를 **분위수 기준 `p99(|E[R]|) < 5σ_mkt`**(또는 위반비율 1% 미만)으로 운용화한다. 전수(`all`) 강제는 정상적 꼬리값에서도 빌드를 깨뜨릴 수 있어 채택하지 않는다. $\sigma_{\text{mkt}}$는 **표준편차**이므로 분산 $\sigma_{\text{mkt}}^2=w_{\text{mkt}}^\top\Sigma w_{\text{mkt}}$의 제곱근을 쓴다(변수명에 차원을 드러냄, §8.4 코드 참조).
 
 ---
 
@@ -521,7 +521,7 @@ def _eig_floor(Sigma, xp, lam_floor, kappa_max):  # lam_floor/kappa_max는 03 §
 | GEMM(행렬곱) | $10^{-8}$ | $0$ | 곱셈 누산, 가장 타이트 |
 | eigh(고유값/벡터) | $10^{-8}$ | $10^{-12}$ | 고유벡터 부호·축퇴 시 atol 보강 |
 | LU/Cholesky-solve($E[R]$) | $10^{-8}$ | $10^{-12}$ | 분해+전후치환 누적 |
-| 최종 산출물 $\Sigma$·$E[R]$·$w^\*$ | $10^{-8}$ | $10^{-12}$ | 계약 상한, 회귀 게이트 |
+| 최종 산출물 $\Sigma$·$E[R]$·$w^*$ | $10^{-8}$ | $10^{-12}$ | 계약 상한, 회귀 게이트 |
 
 ```python
 # tests/test_bl_math.py  (발췌) — CPU/GPU 동치 + 골든값 (ADR-0001 후속작업)

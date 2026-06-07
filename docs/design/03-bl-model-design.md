@@ -268,7 +268,7 @@ $$
 - **DRI(Data Reliability Index)**: $\text{DRI}=0.3\,\text{has\_financial}+0.25\,\text{has\_news}+0.15\,\text{is\_listed}+0.2\,\text{trx\_activity}+0.1$. $\text{DRI}\in[0.1,1]$. 데이터가 빈약할수록 DRI↓ → $\Omega$↑ → 해당 뷰 불신(BL 의미론 정합). **이 설계는 격상판에서도 보존한다.** DRI 하한 0.1에서 $1/\text{DRI}^2$ 증폭은 최대 100배인데, 이는 "데이터가 거의 없는 뷰는 사실상 불신"이라는 **의도된 강한 페널티**다. 다만 기준항을 과도하게 압도하지 않도록 증폭 배수에 상한 클립 $1/\text{DRI}^2 \le M_{\text{DRI}}$(기본 $M_{\text{DRI}}=100$, DRI 하한과 정합)을 둔다.
 - **confidence $\text{conf}_i$**: 과거의 하드코딩(0.85/0.65)을 폐기하고 **검증셋 reliability 캘리브레이션** 실측값 사용(§9.3). $\text{conf}_i\in[0,1]$이며 $1-\text{conf}_i$는 "오신뢰 정도"다.
 - **캘리브레이션 상수 $c_{\text{cal}}$**: $1-\text{conf}_i$를 무차원 보정으로 정규화하는 상수. 검증셋 reliability diagram(§9.3)에서 표본 평균 오신뢰 $\overline{1-\text{conf}}$로 추정하여 $c_{\text{cal}} = \overline{1-\text{conf}}$로 두면, 보정항의 표본 평균이 1이 되어 기준 스케일을 보존한다(평균적 뷰는 보정 무효, 상대적으로 과신한 뷰만 $\Omega$↑). 기본값은 검증셋 추정(가설: 약 0.2~0.4), 안정성 위해 클립 $c_{\text{cal}}\in[0.05, 1]$. (캘리브레이션 전 확정값 아님 — §11 등재.)
-- **하한 $\Omega_{\text{floor}}$ (과신 방지)**: $\Omega$가 비현실적으로 작으면(과신) 사후 폭주를 부르므로 단위 정합 기준에 연동한 하한을 적용한다. $\Omega_{\text{floor},kk} = \eta\cdot(P\tau\Sigma P^\top)_{kk}$, 기본 $\eta=0.05$(가설; 클립 $[0.01, 0.2]$, §9 민감도로 확정). 즉 어떤 뷰도 사전(균형)의 $5\%$보다 더 확신할 수 없게 하여 폭주를 차단한다. 최종 $\Omega_{kk}\leftarrow \max(\Omega_{kk},\ \Omega_{\text{floor},kk})$.
+- **하한 $\Omega_{\text{floor}}$ (과신 방지)**: $\Omega$가 비현실적으로 작으면(과신) 사후 폭주를 부르므로 단위 정합 기준에 연동한 하한을 적용한다. $\Omega_{\text{floor},kk} = \eta\cdot(P\tau\Sigma P^\top)_{kk}$, 기본 $\eta=0.05$(가설; 클립 $[0.01, 0.2]$, §9 민감도로 확정). 즉 어떤 뷰도 사전(균형)의 5%보다 더 확신할 수 없게 하여 폭주를 차단한다. 최종 $\Omega_{kk}\leftarrow \max(\Omega_{kk},\ \Omega_{\text{floor},kk})$.
 
 ### 5.5 $\tau$ 설정
 
@@ -306,7 +306,7 @@ $$
 | 역행렬 회피 | $(\tau\Sigma)^{-1}\Pi$ 등은 직접 역행렬 대신 **선형해(Cholesky/`solve`)** 로 계산. GPU는 `cupy.linalg.solve` |
 | 조건수 | §3.3 보장된 $\Sigma$(수축+고유값바닥) 사용, $\tau\Sigma$도 동일 보장 상속 |
 | $\Omega$ 하한 | 과신($\Omega\to0$) 방지 하한 적용 |
-| 사후 검증 | $E[R]$ 분포가 정상 범위($|E[R]|$ 대부분 $<5\sigma_{\text{mkt}}$) 인지 자동 점검, 이탈 시 빌드 실패 |
+| 사후 검증 | $E[R]$ 분포가 정상 범위($\lvert E[R]\rvert$ 대부분 $<5\sigma_{\text{mkt}}$) 인지 자동 점검, 이탈 시 빌드 실패 |
 | 백엔드 동치 | CPU(NumPy/SciPy)·GPU(CuPy) 결과의 상대오차 $\text{rtol}<10^{-8}$ 회귀테스트($E[R]$·$w^*$·$\Sigma$ 전 산출물 동일 기준, [ADR-0001](./adr/ADR-0001-compute-backend.md)) |
 
 ---

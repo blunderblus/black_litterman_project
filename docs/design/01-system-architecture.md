@@ -287,7 +287,7 @@ flowchart TD
 | 컴포넌트 | 책임 | 입력 | 출력 | 방법론 정합 |
 |---|---|---|---|---|
 | `bl.inputs` | P(뷰행렬)·Q(4축 뷰값)·Ω(불확실성)·Σ(FULL 공분산)·$w_{mkt}$·$w_{current}$ 구성. | ML 예측(pattern/anomaly), 감성(news), `post_data`(relationship·`w_current`), `FINANCIAL_WIDE`(wallet) | BL 입력 행렬 묶음 | Σ는 log-return 공분산 + Ledoit-Wolf 수축; $\Omega\propto 1/\text{DRI}^2$; $\Pi=\lambda\Sigma w_{mkt}$; 4축 결합 가중 $a=(0.35,0.35,0.15,0.15)$ |
-| `bl.optimize` | 사후 기대수익 $E[R]$, 최적 가중 $w^\*$ 산출. | BL 입력 행렬 | `bl_result.parquet` (`E[R]`, `w_star`) | 볼록 QP는 `cvxpy`(OSQP/ECOS) 기본, 비볼록 비율형(Sharpe/IR)은 `scipy.optimize`(SLSQP) 병행([03 BL §7.3](./03-bl-model-design.md)); 정상 범위 검증 |
+| `bl.optimize` | 사후 기대수익 $E[R]$, 최적 가중 $w^*$ 산출. | BL 입력 행렬 | `bl_result.parquet` (`E[R]`, `w_star`) | 볼록 QP는 `cvxpy`(OSQP/ECOS) 기본, 비볼록 비율형(Sharpe/IR)은 `scipy.optimize`(SLSQP) 병행([03 BL §7.3](./03-bl-model-design.md)); 정상 범위 검증 |
 
 BL 핵심 수식(정칙형, precision form; 상세는 [BL 모델 설계 §6.1](./03-bl-model-design.md)):
 

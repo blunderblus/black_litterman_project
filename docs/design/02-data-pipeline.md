@@ -718,7 +718,7 @@ SELECT * FROM RAW_NEWS LIMIT 1000 OFFSET 5000;
 | 4축 완전성 | `bl_input_data`에 news/pattern/anomaly/relationship 4축 원천 컬럼 모두 존재·non-null(`anomaly_score_if`·`net_flow_sign` 포함) | bl_inputs |
 | 사이드카 정렬 | $\Sigma$/$P$/$\Omega$ 차원·`asset_order`가 `bl_input_data` 행순서와 바이트 일치(§3.5) | bl_inputs |
 | 이상치 | `bal` 음수 금지, log-return 0-잔액 분리, `λ`/`κ(Σ)` 정상범위 | features/bl |
-| 퇴화 진단 | `median|weight_diff|>1e-4`, score 분포 비퇴화, action 라벨 정합 | serve([03 BL §9.4](./03-bl-model-design.md)) |
+| 퇴화 진단 | `median\|weight_diff\|>1e-4`, score 분포 비퇴화, action 라벨 정합 | serve([03 BL §9.4](./03-bl-model-design.md)) |
 | 백엔드 동치 | CPU/GPU 수치 상대오차 `<1e-8`(E[R]·w*·Σ 동일 적용) | bl(회귀테스트, [ADR-0001](./adr/ADR-0001-compute-backend.md)·[04 §골든테스트](./04-compute-design.md)) |
 
 ## 7.2 pandera 스키마 예시 (`bl_input_data`)
