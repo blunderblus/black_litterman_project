@@ -39,12 +39,43 @@
 
 ---
 
+## Quickstart
+
+```bash
+pip install -e .            # 코어 설치 (GPU 가속은 옵션: pip install -e ".[gpu]")
+bl-run demo                 # 합성 데이터로 전 파이프라인 실행 → site/index.html 생성 (키 불필요)
+# 브라우저로 site/index.html 열기 (또는: python -m http.server -d site)
+```
+
+데모는 `data/sample/`의 소형 합성 데이터(PII 없음)로 **features → models(XGBoost·IForest) →
+Black-Litterman → 마케팅 의사결정 → 대시보드**까지 전 과정을 실행합니다. GitHub Pages에 자동
+배포됩니다(`.github/workflows/pages.yml`).
+
+### 실데이터로 전환 (API 키만 입력하면 동일 파이프라인이 실데이터로 동작)
+
+```bash
+cp .env.example .env        # 아래 키 채우기 (BL_ 프리픽스)
+#   BL_DART_API_KEY     = OpenDART 재무
+#   BL_ECOS_API_KEY     = 한국은행 ECOS 매크로
+#   BL_NAVER_CLIENT_ID/SECRET = Naver 뉴스
+#   BL_GEMINI_API_KEY   = (선택) Gemini 감성 (없으면 규칙기반 폴백)
+# 내부 소스(target_master, post_data)는 data/raw/ 에 배치(접근통제)
+python -c "from bl.pipeline import run; run()"   # 키 있으면 ingest, 없으면 sample 자동 디스패치
+```
+
+`bl.pipeline.run()` 은 키 유무를 감지해 **ingest(실데이터)** 또는 **sample(합성)** 경로를 자동
+선택하며, 그 이후 다운스트림은 완전히 동일합니다. 부분 키만 있으면 가능한 소스는 실데이터로,
+나머지는 합성으로 graceful 대체합니다.
+
+---
+
 ## 프로젝트 상태
 
 **토이(Google Drive + Colab) → 프로덕션(클라우드) 격상 진행 중.**
 
-- 현재 단계: **기획·설계 문서화** (git 미개설 · 베이스 코드 구축 전)
-- 다음 단계(로드맵 Phase와 정렬, P0~P7): **P0** 베이스 코드 구축·`git init` → **P1~P2** 데이터 레이어 이관·ID crosswalk → **P3** 피처·모델 재구현 → **P4** BL 입력·최적화 재구현 → **P5~P6** 합성 샘플데이터·GitHub Pages 데모 → **P7** 운영화(스케줄·관측성·회귀테스트)
+- 완료: **P0** 스캐폴드 · **P1** 데이터 레이어(io·crosswalk·universe) · **P4** BL 엔진(공분산·사후·최적화) ·
+  BL 입력/출력변환 · **P3** 피처/모델 · **P5~P6** 합성 샘플데이터 + 대시보드 + Pages CI · ingest(키 게이팅)
+- 다음: 실데이터 라이브 검증, 운영화(스케줄·관측성), 대시보드 고도화
 - 격상 핵심 변경:
   - Colab 속도 제약으로 희생됐던 **공분산 대각 근사 → FULL 공분산**(Ledoit-Wolf 수축) 복원
   - **GPU 유무 = 속도만 차이** (NumPy/SciPy ↔ CuPy 단일코드 디스패치, 수치 동일 · CPU/GPU 상대오차 <1e-8 회귀테스트)

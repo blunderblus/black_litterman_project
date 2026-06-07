@@ -96,9 +96,14 @@ def run_demo(
     seed: int = 42,
     render: bool = True,
 ) -> dict:
-    """합성 데모로 전 파이프라인을 실행하고 대시보드(JSON+HTML)를 docs/에 생성한다."""
-    frames = _load_sample(sample_dir)
+    """합성 데모: sample → 전 파이프라인 → 대시보드(site/). 키 불필요."""
+    return _pipeline_from_frames(_load_sample(sample_dir), out_dir=out_dir, base_ym=base_ym,
+                                 top_n=top_n, seed=seed, render=render, source="synthetic-demo")
 
+
+def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, top_n=200,
+                          seed=42, render=True, source="live") -> dict:
+    """프레임(데모/실데이터 공통) → features→models→BL→마트→대시보드. 동일 다운스트림."""
     # features → models
     feat = build_features_from_frames(
         frames["post_data"], frames["financial_wide"], frames["macro"],
@@ -148,7 +153,7 @@ def run_demo(
 
     meta = {
         "base_ym": base_ym, "n_assets": n, "lambda": round(float(inp["lambda"]), 4),
-        "tau": inp["tau"], "source": "synthetic-demo",
+        "tau": inp["tau"], "source": source,
         "model_confidence": {k: round(v["confidence"], 4) for k, v in gc_models.items()},
     }
     result = {"mart": mart, "inputs_meta": inp["metadata"], "meta": meta}
@@ -164,6 +169,68 @@ def run_demo(
             "demo dashboard 생성", extra={"stage": "pipeline.run_demo", "json": json_path, "html": html_path},
         )
     return result
+
+
+def load_frames(settings, sample_dir: str | Path = "data/sample", raw_dir: str | Path = "data/raw") -> dict:
+    """키가 있으면 ingest로 실데이터 프레임을, 없으면 합성 sample을 반환(동일 다운스트림).
+
+    내부 소스(target_master/post_data)는 raw_dir(접근통제), 외부(재무/매크로/뉴스)는 공식 API.
+    개별 수집 실패는 sample 로 graceful 대체(부분 키로도 대시보드 생성).
+    """
+    has_dart = settings.dart_api_key is not None
+    if settings.env == "demo" or not has_dart:
+        log.info("ingest 키 없음/demo 모드 → 합성 sample 사용", extra={"stage": "pipeline.load_frames"})
+        return _load_sample(sample_dir)
+
+    from bl.common.io import read_parquet
+    from bl.enrich import sentiment as enr
+    from bl.ingest import financial as ing_fin
+    from bl.ingest import macro as ing_mac
+    from bl.ingest import news as ing_news
+
+    raw = Path(raw_dir)
+    tm = read_parquet(raw / "target_master.parquet")    # 내부 유니버스(필수)
+    post = read_parquet(raw / "post_data.parquet")       # 내부 예금 패널(필수)
+    real = tm[~tm["IS_VIRTUAL"].fillna(False)]
+    corp_codes = real["corp_code"].astype(str).tolist()
+    targets = list(zip(corp_codes, real["TARGET_NAME"].astype(str), strict=False))
+    months = sorted(int(m) for m in post["base_ym"].unique())
+    years = sorted({m // 100 for m in months})
+
+    def _try(fn, name):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            log.warning(f"{name} 수집 실패 → sample 대체: {e}", extra={"stage": "pipeline.load_frames"})
+            return None
+
+    fin = _try(lambda: ing_fin.collect_financial(settings, corp_codes, years), "financial")
+    mac = _try(lambda: ing_mac.collect_macro(settings, months[0], months[-1]), "macro")
+    news = _try(lambda: ing_news.collect_news(settings, targets), "news")
+    sent = enr.score_sentiment(news, settings) if news is not None and len(news) else None
+
+    sample = _load_sample(sample_dir) if (fin is None or mac is None or sent is None) else None
+    return {
+        "target_master": tm, "post_data": post,
+        "financial_wide": fin if fin is not None else sample["financial_wide"],
+        "macro": mac if mac is not None else sample["macro"],
+        "company_sentiment": sent if sent is not None else sample["company_sentiment"],
+    }
+
+
+def run(
+    settings=None, *, out_dir: str | Path = "site", raw_dir: str | Path = "data/raw",
+    sample_dir: str | Path = "data/sample", base_ym: int = DEFAULT_BASE_YM,
+    top_n: int = 200, seed: int = 42, render: bool = True,
+) -> dict:
+    """실데이터(키)/데모(무키) 통합 실행 — **API 키만 채우면 동일 파이프라인이 실데이터로 동작**."""
+    from bl.common.config import get_settings
+
+    s = settings or get_settings()
+    frames = load_frames(s, sample_dir=sample_dir, raw_dir=raw_dir)
+    src = "synthetic-demo" if (s.env == "demo" or s.dart_api_key is None) else "live"
+    return _pipeline_from_frames(frames, out_dir=out_dir, base_ym=base_ym, top_n=top_n,
+                                 seed=seed, render=render, source=src)
 
 
 if __name__ == "__main__":

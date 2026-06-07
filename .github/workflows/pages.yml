@@ -1,0 +1,47 @@
+name: Deploy demo dashboard to GitHub Pages
+
+# 합성 데모 데이터(data/sample)로 대시보드를 빌드해 GitHub Pages에 배포한다.
+# 실데이터/시크릿은 사용하지 않는다(공개 데모 = 합성만).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Build demo dashboard (synthetic data → site/)
+        run: |
+          python -m bl.synth.generate
+          python -m bl.pipeline
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
