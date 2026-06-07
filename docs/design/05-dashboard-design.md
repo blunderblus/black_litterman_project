@@ -169,7 +169,7 @@ flowchart LR
     JSON["mart/*.json<br/>fetch/lazy-load용"]
     META["meta.json<br/>base_ym 등 라벨"]
   end
-  QMD -->|render 시 params 주입| OUT["정적 HTML(<5MB)"]
+  QMD -->|render 시 params 주입| OUT["정적 HTML(&lt;5MB)"]
   SCSS --> OUT
   JSON -.->|런타임 fetch / lazy-load| OUT
   META -.->|라벨 동적 주입| OUT
@@ -188,9 +188,9 @@ flowchart LR
 ```mermaid
 flowchart TD
   HOME["POST-BL // SALES TERMINAL<br/>(KPI 헤더 상시 노출)"]
-  HOME --> F1["[F1] MARKET_SCAN<br/>스캔·랭킹"]
-  HOME --> F2["[F2] ANALYTICS<br/>분석"]
-  HOME --> F3["[F3] MODEL_DOCS<br/>방법론"]
+  HOME --> F1["(F1) MARKET_SCAN<br/>스캔·랭킹"]
+  HOME --> F2["(F2) ANALYTICS<br/>분석"]
+  HOME --> F3["(F3) MODEL_DOCS<br/>방법론"]
   F1 --> DETAIL["기업 스코어카드<br/>(마스터-디테일)"]
   DETAIL --> NOTE["세일즈 노트"]
 ```
@@ -212,7 +212,7 @@ flowchart LR
   end
   subgraph DETAIL["기업 스코어카드 (디테일)"]
     HD["헤더: corp_name · tier · sector_name · base_ym · DRI"]
-    BL["BL 패널: Π · Q · Ω(사이드카) · bl_return(E[R]) · current_weight → target_weight"]
+    BL["BL 패널: Π · Q · Ω(사이드카) · bl_return(E(R)) · current_weight → target_weight"]
     AI["4축 모델 의견: 성장/이탈/이상/뉴스감성"]
     GAP["funding_gap(KRW) + action_guide"]
     NOTE["세일즈 노트(자동 생성 권고 문구)"]
@@ -394,7 +394,7 @@ flowchart LR
   SPLIT -->|기업별 단건| CARD["{base_ym}/cards/{corp_code}.json (lazy)"]
   SPLIT -->|집계| AGG["{base_ym}/analytics_agg.json"]
   SPLIT -->|라벨·KPI| META["{base_ym}/meta.json"]
-  RANK & AGG & META -->|초기 로드| HTML["index.html (<5MB)"]
+  RANK & AGG & META -->|초기 로드| HTML["index.html (&lt;5MB)"]
   CARD -.->|행 선택 시 fetch| HTML
 ```
 

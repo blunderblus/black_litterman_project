@@ -86,7 +86,7 @@ universe → ingest → refine → enrich → features → models → bl_inputs 
 
 ```mermaid
 flowchart LR
-  subgraph SRC[외부/내부 소스]
+  subgraph SRC["외부/내부 소스"]
     DART[OpenDART]
     ECOS[ECOS]
     FDR[FDR]
@@ -104,7 +104,7 @@ flowchart LR
   FE["features<br/>post_data_panel / train_set / inference_set"]
   ML["models<br/>ML_PREDICTIONS"]
   BI["bl_inputs<br/>bl_input_data (P·Q·Ω·Σ·w_mkt)"]
-  BO["bl_optimize<br/>bl_result (E[R], w*)"]
+  BO["bl_optimize<br/>bl_result (E(R), w*)"]
   SV["serve<br/>bl_dashboard_mart + JSON"]
 
   DART --> IN_F
@@ -780,7 +780,7 @@ bl_input_schema = pa.DataFrameSchema({
 
 ```mermaid
 flowchart LR
-  API[OpenDART REST] -->|status=000 & list 비어있지 않음| RAW[RAW_FINANCIAL<br/>계정단위 원천]
+  API[OpenDART REST] -->|"status=000 & list 비어있지 않음"| RAW[RAW_FINANCIAL<br/>계정단위 원천]
   RAW -->|cash_amount 집계·요약| WIDE[FINANCIAL_WIDE<br/>기업·연도 와이드]
   RAW -. 재가공 .-> WIDE
   WIDE --> BLI[bl_input_data]

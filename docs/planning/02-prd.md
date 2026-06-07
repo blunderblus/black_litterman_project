@@ -102,7 +102,7 @@ flowchart LR
   ENR --> FEAT["features\n시계열·재무"]
   FEAT --> MOD["models\nXGBoost·IF"]
   MOD --> BLI["bl_inputs\nQ·Ω·Σ·w"]
-  BLI --> BLO["bl_optimize\nE[R]·w*"]
+  BLI --> BLO["bl_optimize\nE(R)·w*"]
   BLO --> SRV["serve\n대시보드·마트"]
 
   ING -.-> FR1[FR-01 수집]

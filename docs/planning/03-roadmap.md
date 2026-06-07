@@ -24,8 +24,8 @@ flowchart LR
   A[문서화\nPhase 0] --> B[베이스코드 골격\nPhase 0]
   B --> C[git init\nPhase 1]
   C --> D[데이터레이어 이관\nDuckDB+Parquet\nPhase 2]
-  D --> E[모델/BL 재구현\nPhase 3-4]
-  E --> F[샘플(합성) 데이터\nPhase 5]
+  D --> E["모델/BL 재구현\nPhase 3-4"]
+  E --> F["샘플(합성) 데이터\nPhase 5"]
   F --> G[GitHub Pages 데모\nPhase 6]
   G --> H[운영화\nPhase 7]
   classDef now fill:#ffe9b3,stroke:#c98a00,color:#000;
@@ -128,13 +128,13 @@ flowchart LR
 flowchart TD
   U[universe.master\nTARGET_MASTER] --> I1[ingest.financial]
   U --> I2[ingest.macro]
-  U --> I3[ingest.news --src naver]
+  U --> I3["ingest.news --src naver"]
   I3 --> R[refine.news_dedup]
   R --> EN[enrich.sentiment]
   I1 --> F[features.builder]
   I2 --> F
   EN --> F
-  F --> M[models.growth_churn/anomaly]
+  F --> M["models.growth_churn/anomaly"]
   M --> BI[bl.inputs]
   I1 --> BI
   BI --> BO[bl.optimize]

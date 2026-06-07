@@ -234,7 +234,7 @@ flowchart TD
     end
     subgraph BL["블랙-리터만"]
         BIN["bl_inputs<br/>Σ(FULL)·Π·P·Q·Ω·w_mkt"]
-        BOPT["bl_optimize<br/>사후수익 E[R]·최적 w*"]
+        BOPT["bl_optimize<br/>사후수익 E(R)·최적 w*"]
     end
     subgraph OUT["제공 (serve)"]
         DASH["Quarto + Plotly<br/>대시보드 / 마트"]

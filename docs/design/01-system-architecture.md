@@ -130,7 +130,7 @@ flowchart LR
 
   subgraph L2[2. 저장 / Storage]
     DUCK[(DuckDB<br/>raw_collection.duckdb)]
-    PARQ[(Parquet<br/>processed/*)]
+    PARQ[("Parquet<br/>processed/*")]
     XWALK[(ID Crosswalk)]
   end
 
@@ -334,7 +334,7 @@ flowchart TB
 
   subgraph DATA[데이터 계층]
     direction TB
-    OBJ[(객체 스토리지<br/>Parquet: raw·interim·processed·sample)]
+    OBJ[("객체 스토리지<br/>Parquet: raw·interim·processed·sample")]
     DDB[(DuckDB<br/>raw_collection.duckdb<br/>컴퓨트 노드 로컬 파일)]
   end
 

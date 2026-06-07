@@ -73,7 +73,7 @@ flowchart LR
   AI["4축 AI 뷰 앙상블"] -->|P, Q, Omega| VIEW["전망분포"]
   PRIOR --> BAYES["베이즈 결합"]
   VIEW --> BAYES
-  BAYES --> POST["사후 E[R], 사후공분산"]
+  BAYES --> POST["사후 E(R), 사후공분산"]
   POST --> OPT["제약 최적화 -> w_target"]
   OPT --> OUT["weight_diff -> marketing_score -> action_guide -> funding_gap"]
 ```

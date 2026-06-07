@@ -340,8 +340,8 @@ flowchart LR
   H3 --> SIG["Sigma (PSD, 조건수 보장)"]
   SIG --> PI["Pi = lambda*Sigma*w_mkt (03 §4)"]
   SIG --> H4["H4 좌변 GEMM (tauSigma)(P'Om^-1 P)"]
-  PI --> H5["H5 단일 선형해 G·E[R]=b (LU 1회)"]
-  H4 --> H5 --> H6["H6 w* 사후공분산 분해(Cholesky) → E[R]"]
+  PI --> H5["H5 단일 선형해 G·E(R)=b (LU 1회)"]
+  H4 --> H5 --> H6["H6 w* 사후공분산 분해(Cholesky) → E(R)"]
   H6 --> H7["H7 최적화 반복 목적평가"] --> H8["H8 QP 솔버 (CPU)"]
   H8 --> WSTAR["w*  → weight_diff (03 §8)"]
 ```
