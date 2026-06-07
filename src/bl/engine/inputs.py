@@ -4,8 +4,8 @@
 과거 토이 결함 교정: 앵커를 w_mkt로(현상유지 w_hybrid 아님), Q·Ω·τΣ **단위 정합**(분산정합),
 Ω∝1/DRI²(+§5.4 하한·M_DRI 캡) 보존, confidence 기반 가중(c_cal 데이터기반).
 
-오프라인 검증을 위해 **순수 함수 assemble_bl_inputs(DataFrame+패널)** 를 핵심으로 두고,
-DuckDB 결합 래퍼 build_bl_inputs 는 features/ingest 연동 후 채운다.
+핵심은 **순수 함수 assemble_bl_inputs(DataFrame+패널)** 이다. DB/ingest 경로도 pipeline.run()
+(load_frames→프레임)을 거쳐 동일 함수로 수렴하므로 별도 DuckDB 결합 래퍼를 두지 않는다(단일 경로).
 """
 
 from __future__ import annotations
@@ -19,10 +19,7 @@ from bl.common.logging import get_logger
 from bl.engine.covariance import shrunk_covariance
 
 if TYPE_CHECKING:
-    import duckdb
     import pandas as pd
-
-    from bl.common.config import Settings
 
 log = get_logger(__name__)
 
@@ -211,13 +208,3 @@ def assemble_bl_inputs(
         "metadata": {"n": n, "q_scale": c, "c_cal": ccal,
                      "axis_weights": axis_weights or AXIS_WEIGHTS, "omega_scale": float(omega_scale)},
     }
-
-
-def build_bl_inputs(con: duckdb.DuckDBPyConnection, settings: Settings, base_ym: int) -> dict:
-    """DuckDB(ml_master+ML_PREDICTIONS+COMPANY_SENTIMENT+post_data) 결합 → assemble_bl_inputs.
-
-    features/models/ingest 연동 후 구현(현재는 assemble_bl_inputs 를 직접 사용).
-    """
-    raise NotImplementedError(
-        "features/models 연동 후 구현 — 현재는 assemble_bl_inputs(assets_df, returns_panel) 사용"
-    )

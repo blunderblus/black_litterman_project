@@ -144,14 +144,29 @@ def run_from_frames(
     frames: dict, *, base_ym: int = DEFAULT_BASE_YM, seed: int = 42,
     render: bool = False, source: str = "frames",
     tau: float | None = None, axis_weights: dict | None = None, omega_scale: float = 1.0,
+    ledger_path: str | None = None, run_ts: str | None = None,
 ) -> dict:
     """프레임(데모/실데이터/백테스트 공통) → 전체 BL 파이프라인 1회 실행(공개 진입점).
 
     렌더 없이(기본) mart 만 반환하므로 백테스트·오프라인 평가가 시점별로 반복 호출한다.
     tau/axis_weights/omega_scale 은 BL 하이퍼파라미터 override(eval.calibrate 가 실현지표로 역산).
+    ledger_path 지정 시 권고를 append 원장에 적재한다(serve.ledger, 묶임줄 발행 기록).
     """
-    return _pipeline_from_frames(frames, base_ym=base_ym, seed=seed, render=render, source=source,
-                                 tau=tau, axis_weights=axis_weights, omega_scale=omega_scale)
+    result = _pipeline_from_frames(frames, base_ym=base_ym, seed=seed, render=render, source=source,
+                                   tau=tau, axis_weights=axis_weights, omega_scale=omega_scale)
+    if ledger_path:
+        _log_to_ledger(result, ledger_path, run_ts)
+    return result
+
+
+def _log_to_ledger(result: dict, ledger_path: str, run_ts: str | None) -> None:
+    """권고를 append 원장에 적재(run_ts 미지정 시 UTC 타임스탬프 생성)."""
+    from datetime import UTC, datetime
+
+    from bl.serve.ledger import append_recommendations
+
+    ts = run_ts or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    append_recommendations(result, db_path=ledger_path, run_ts=ts)
 
 
 def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, top_n=200,
@@ -297,15 +312,22 @@ def run(
     settings=None, *, out_dir: str | Path = "site", raw_dir: str | Path = "data/raw",
     sample_dir: str | Path = "data/sample", base_ym: int = DEFAULT_BASE_YM,
     top_n: int = 200, seed: int = 42, render: bool = True,
+    ledger_path: str | None = None, run_ts: str | None = None,
 ) -> dict:
-    """실데이터(키)/데모(무키) 통합 실행 — **API 키만 채우면 동일 파이프라인이 실데이터로 동작**."""
+    """실데이터(키)/데모(무키) 통합 실행 — **API 키만 채우면 동일 파이프라인이 실데이터로 동작**.
+
+    ledger_path 지정 시 이번 실행 권고를 append 원장에 적재한다(serve.ledger, 묶임줄 발행 기록).
+    """
     from bl.common.config import get_settings
 
     s = settings or get_settings()
     frames = load_frames(s, sample_dir=sample_dir, raw_dir=raw_dir, base_ym=base_ym)
     src = "synthetic-demo" if (s.env == "demo" or s.dart_api_key is None) else "live"
-    return _pipeline_from_frames(frames, out_dir=out_dir, base_ym=base_ym, top_n=top_n,
-                                 seed=seed, render=render, source=src)
+    result = _pipeline_from_frames(frames, out_dir=out_dir, base_ym=base_ym, top_n=top_n,
+                                   seed=seed, render=render, source=src)
+    if ledger_path:
+        _log_to_ledger(result, ledger_path, run_ts)
+    return result
 
 
 if __name__ == "__main__":

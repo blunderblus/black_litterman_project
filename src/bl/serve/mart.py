@@ -17,10 +17,7 @@ import numpy as np
 from bl.common.logging import get_logger
 
 if TYPE_CHECKING:
-    import duckdb
     import pandas as pd
-
-    from bl.common.config import Settings
 
 log = get_logger(__name__)
 
@@ -156,11 +153,3 @@ def compute_marketing_outputs(
     out["action_guide"] = actions
     out["funding_gap"] = gap
     return out
-
-
-def build_mart(con: duckdb.DuckDBPyConnection, settings: Settings, base_ym: int) -> pd.DataFrame:
-    """DuckDB 메타 + BL 결과 결합 → bl_dashboard_mart(컬럼 권위 스키마 02 §3.2.3, bl_return/pi/q/omega/
-    market_weight 포함). 엔진/메타 연동 후 구현(현재는 compute_marketing_outputs 직접 사용). pickle 금지."""
-    raise NotImplementedError(
-        "메타 결합은 features/serve 연동 후 구현 — 현재는 compute_marketing_outputs(df) 사용"
-    )
