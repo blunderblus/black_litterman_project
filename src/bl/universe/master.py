@@ -64,7 +64,7 @@ def assign_tier(stock_code: object, is_virtual: bool = False) -> str:
     return "T1" if (s is not None and re.fullmatch(r"[0-9]{6}", s)) else "T2"
 
 
-def build_master_frame(candidates: "Sequence[pd.DataFrame]") -> "pd.DataFrame":
+def build_master_frame(candidates: Sequence[pd.DataFrame]) -> pd.DataFrame:
     """후보 소스들로부터 TARGET_MASTER DataFrame을 조립한다(적재 전, 순수 함수).
 
     candidates: corp_code 를 가진 DataFrame들(선택적으로 biz_reg_no/jurir_no/stock_code/
@@ -106,8 +106,8 @@ def build_master_frame(candidates: "Sequence[pd.DataFrame]") -> "pd.DataFrame":
 
 def build_target_master(
     con,
-    settings: "Settings | None",
-    candidates: "Sequence[pd.DataFrame] | None" = None,
+    settings: Settings | None,
+    candidates: Sequence[pd.DataFrame] | None = None,
     max_unknown_ratio: float = DEFAULT_MAX_UNKNOWN_RATIO,
 ) -> int:
     """TARGET_MASTER 를 구성하고 DuckDB에 멱등 적재한다. 적재 행 수 반환.

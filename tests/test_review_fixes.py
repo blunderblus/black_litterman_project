@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 def test_walk_forward_embargo_excludes_horizon():
@@ -60,8 +59,8 @@ def test_financial_paren_negative():
 
 def test_financial_features_no_lookahead():
     # 공시 가용월 이전(base_ym < fin_ym+lag)에는 재무 피처가 비어 있어야(look-ahead 차단)
-    from bl.features.builder import FIN_DISCLOSURE_LAG, build_features_from_frames
     from bl.common.dates import ym_add
+    from bl.features.builder import FIN_DISCLOSURE_LAG, build_features_from_frames
 
     post = pd.DataFrame({
         "corp_code": ["00000001"] * 6,

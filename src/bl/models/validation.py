@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 def walk_forward_splits(
-    df: "pd.DataFrame",
+    df: pd.DataFrame,
     time_col: str = "base_ym",
     n_splits: int = 3,
     min_train_periods: int = 6,

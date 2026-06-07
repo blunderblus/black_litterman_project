@@ -62,7 +62,7 @@ def parse_fnlttSinglAcntAll(payload: dict, corp_code: str, base_ym: int) -> dict
 
 
 def collect_financial(
-    settings: "Settings", corp_codes: list[str], years: list[int], fs_div: str = "CFS"
+    settings: Settings, corp_codes: list[str], years: list[int], fs_div: str = "CFS"
 ) -> pd.DataFrame:
     """corp_code별 최신 사업보고서(reprt_code=11011) 재무를 수집해 financial_wide 반환(라이브, 키 필요)."""
     from bl.common.http import get_json

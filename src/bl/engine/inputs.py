@@ -36,7 +36,7 @@ LAMBDA_CLIP = (1.0, 5.0)   # λ 클립 범위(§4.2)
 Q_CLIP_SIGMA = 3.0        # |Q| ≤ Q_CLIP_SIGMA·σ_asset 클립(§5.2)
 
 
-def compute_dri(assets: "pd.DataFrame") -> np.ndarray:
+def compute_dri(assets: pd.DataFrame) -> np.ndarray:
     """데이터신뢰도지수 DRI ∈ [0.1, 1.0] (설계 §5.4). 결측 구성요소는 0 취급."""
     n = len(assets)
     dri = np.full(n, DRI_BASE)
@@ -70,10 +70,14 @@ def calibrate_lambda(returns_panel, w_mkt: np.ndarray, sigma: np.ndarray, rf: fl
     return clipped
 
 
-def build_views(assets: "pd.DataFrame", scaler: dict | None = None) -> np.ndarray:
+def build_views(
+    assets: pd.DataFrame, scaler: dict | None = None, axis_weights: dict | None = None
+) -> np.ndarray:
     """4축 신호 → (고정 스케일러 또는 배치 z-score) 표준화 → 가중합 q_raw(단위 없음) 반환.
 
     anomaly 축: 거래흐름(trx_in/out)이 있으면 방향 부호 적용, 없으면 부호 미적용(신호 보존).
+    axis_weights 미지정 시 모듈 기본 AXIS_WEIGHTS 사용 — 백테스트 역산(eval.calibrate)이
+    이 가중을 override 해 실현 IC 로 추정값을 찾는다.
     """
     n = len(assets)
     have_flow = "trx_in" in assets.columns and "trx_out" in assets.columns
@@ -97,7 +101,7 @@ def build_views(assets: "pd.DataFrame", scaler: dict | None = None) -> np.ndarra
 
     q_raw = np.zeros(n)
     warned = False
-    for axis, weight in AXIS_WEIGHTS.items():
+    for axis, weight in (axis_weights or AXIS_WEIGHTS).items():
         raw = axis_raw(axis)
         if scaler and axis in scaler:
             mu, sd = scaler[axis]
@@ -125,7 +129,7 @@ def _norm_weights(x: np.ndarray) -> np.ndarray:
 
 
 def assemble_bl_inputs(
-    assets: "pd.DataFrame",
+    assets: pd.DataFrame,
     returns_panel,
     *,
     tau: float = DEFAULT_TAU,
@@ -133,6 +137,8 @@ def assemble_bl_inputs(
     rf: float = 0.0,
     scaler: dict | None = None,
     conf_cal: float | None = None,
+    axis_weights: dict | None = None,
+    omega_scale: float = 1.0,
     preference: str | None = None,
 ) -> dict:
     """자산 메타(assets)와 수익률 패널(T×N)로 BL 입력 dict를 구성한다(절대뷰 P=I).
@@ -170,7 +176,7 @@ def assemble_bl_inputs(
     dri = compute_dri(assets)
 
     # Q 단위정합: c = sqrt(τ·mean(diagΣ)/Var(q_raw)) → Var(Q)=τ·mean(diagΣ) (§5.2 method 2)
-    q_raw = build_views(assets, scaler)
+    q_raw = build_views(assets, scaler, axis_weights)
     mean_var = float(np.mean(np.diag(sigma)))
     var_qraw = float(np.var(q_raw))
     c = math.sqrt(tau * mean_var / var_qraw) if var_qraw > 1e-18 else 0.0
@@ -187,8 +193,8 @@ def assemble_bl_inputs(
     conf = np.clip((cg + gc) / 2.0, 0.0, 1.0)
     ccal = conf_cal if conf_cal is not None else float(np.clip(np.mean(1.0 - conf), 0.05, 1.0))
     inv_dri2 = np.minimum(1.0 / dri**2, M_DRI)
-    omega_diag = base * inv_dri2 * ((1.0 - conf) / ccal)
-    omega_diag = np.maximum(omega_diag, OMEGA_FLOOR_ETA * base)
+    omega_diag = base * inv_dri2 * ((1.0 - conf) / ccal) * float(omega_scale)
+    omega_diag = np.maximum(omega_diag, OMEGA_FLOOR_ETA * base)  # 하한은 scale 무관 안전장치
 
     return {
         "tickers": tickers,
@@ -202,11 +208,12 @@ def assemble_bl_inputs(
         "w_current": w_current,
         "DRI": dri,
         "lambda": lam,
-        "metadata": {"n": n, "q_scale": c, "c_cal": ccal, "axis_weights": AXIS_WEIGHTS},
+        "metadata": {"n": n, "q_scale": c, "c_cal": ccal,
+                     "axis_weights": axis_weights or AXIS_WEIGHTS, "omega_scale": float(omega_scale)},
     }
 
 
-def build_bl_inputs(con: "duckdb.DuckDBPyConnection", settings: "Settings", base_ym: int) -> dict:
+def build_bl_inputs(con: duckdb.DuckDBPyConnection, settings: Settings, base_ym: int) -> dict:
     """DuckDB(ml_master+ML_PREDICTIONS+COMPANY_SENTIMENT+post_data) 결합 → assemble_bl_inputs.
 
     features/models/ingest 연동 후 구현(현재는 assemble_bl_inputs 를 직접 사용).

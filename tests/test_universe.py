@@ -34,10 +34,10 @@ def test_build_master_frame_tiers_and_name() -> None:
     unlisted = pd.DataFrame({"corp_code": ["00000002"], "jurir_no": ["2222222222222"]})
     virtual = pd.DataFrame({"corp_code": ["SECTOR_G47"], "IS_VIRTUAL": [True]})
     m = master.build_master_frame([listed, unlisted, virtual])
-    tiers = dict(zip(m["TARGET_ID"], m["TIER"]))
+    tiers = dict(zip(m["TARGET_ID"], m["TIER"], strict=True))
     assert tiers == {"00000001": "T1", "00000002": "T2", "SECTOR_G47": "T3"}
     assert m["TARGET_ID"].is_unique
-    names = dict(zip(m["TARGET_ID"], m["TARGET_NAME"]))
+    names = dict(zip(m["TARGET_ID"], m["TARGET_NAME"], strict=True))
     assert names["00000001"] == "삼성전자"
     assert names["00000002"] == "00000002"  # enrich 전 corp_code 대체
 

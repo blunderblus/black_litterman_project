@@ -30,7 +30,7 @@ def _q(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
 
-def duckdb_connect(db_path: str | Path, read_only: bool = False) -> "duckdb.DuckDBPyConnection":
+def duckdb_connect(db_path: str | Path, read_only: bool = False) -> duckdb.DuckDBPyConnection:
     """DuckDB 연결을 연다. 부모 디렉터리는 자동 생성한다."""
     import duckdb
 
@@ -40,14 +40,14 @@ def duckdb_connect(db_path: str | Path, read_only: bool = False) -> "duckdb.Duck
     return duckdb.connect(str(p), read_only=read_only)
 
 
-def read_parquet(path: str | Path, columns: Sequence[str] | None = None) -> "pd.DataFrame":
+def read_parquet(path: str | Path, columns: Sequence[str] | None = None) -> pd.DataFrame:
     """Parquet → DataFrame."""
     import pandas as pd
 
     return pd.read_parquet(path, columns=list(columns) if columns else None)
 
 
-def write_parquet(df: "pd.DataFrame", path: str | Path) -> Path:
+def write_parquet(df: pd.DataFrame, path: str | Path) -> Path:
     """DataFrame → Parquet (원자적 쓰기: temp 파일 작성 후 rename)."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -62,7 +62,7 @@ def write_parquet(df: "pd.DataFrame", path: str | Path) -> Path:
     return out
 
 
-def _table_columns(con: "duckdb.DuckDBPyConnection", table: str) -> list[str] | None:
+def _table_columns(con: duckdb.DuckDBPyConnection, table: str) -> list[str] | None:
     """테이블이 존재하면 컬럼명 리스트, 없으면 None."""
     rows = con.execute(
         "SELECT column_name FROM information_schema.columns "
@@ -73,9 +73,9 @@ def _table_columns(con: "duckdb.DuckDBPyConnection", table: str) -> list[str] | 
 
 
 def upsert(
-    con: "duckdb.DuckDBPyConnection",
+    con: duckdb.DuckDBPyConnection,
     table: str,
-    df: "pd.DataFrame",
+    df: pd.DataFrame,
     keys: Sequence[str],
     *,
     in_transaction: bool = False,

@@ -40,7 +40,7 @@ def _spw(y: np.ndarray) -> float:
     return (neg / pos) if pos > 0 else 1.0
 
 
-def _cv_auc(df: "pd.DataFrame", label_col: str, feats: list[str], seed: int) -> float | None:
+def _cv_auc(df: pd.DataFrame, label_col: str, feats: list[str], seed: int) -> float | None:
     """walk-forward out-of-sample 평균 AUC(없으면 None). confidence 의 경험적 근거."""
     aucs = []
     for tr, te in walk_forward_splits(df, "base_ym", n_splits=3, embargo=LABEL_HORIZON):
@@ -56,7 +56,7 @@ def _cv_auc(df: "pd.DataFrame", label_col: str, feats: list[str], seed: int) -> 
     return float(np.mean(aucs)) if aucs else None
 
 
-def train(train_set: "pd.DataFrame", settings: "Settings | None" = None, seed: int = 42) -> dict:
+def train(train_set: pd.DataFrame, settings: Settings | None = None, seed: int = 42) -> dict:
     """성장·이탈 분류기를 학습한다. 반환: {target: {model, confidence, features}}.
 
     confidence 는 walk-forward AUC(out-of-sample). 검증 불가(소표본/단일클래스) 시 0.5(미지).
@@ -83,10 +83,10 @@ def train(train_set: "pd.DataFrame", settings: "Settings | None" = None, seed: i
     return models
 
 
-def predict(models: dict, inference_set: "pd.DataFrame") -> "pd.DataFrame":
+def predict(models: dict, inference_set: pd.DataFrame) -> pd.DataFrame:
     """prob_growth_raw/prob_churn_raw + confidence_* 산출(corp_code 단위)."""
     out = inference_set[["corp_code"]].copy()
-    for target, label_col in LABELS.items():
+    for target, _label_col in LABELS.items():
         spec = models.get(target, {})
         m = spec.get("model")
         feats = spec.get("features", [c for c in FEATURE_COLS if c in inference_set.columns])

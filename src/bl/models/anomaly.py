@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from bl.common.config import Settings
 
 
-def train(train_set: "pd.DataFrame", settings: "Settings | None" = None, seed: int = 42) -> dict:
+def train(train_set: pd.DataFrame, settings: Settings | None = None, seed: int = 42) -> dict:
     """IsolationForest 적합 + **train-fit 고정 스케일러**(IForest는 스케일 민감) + score 경계 저장."""
     from sklearn.ensemble import IsolationForest
 
@@ -34,7 +34,7 @@ def train(train_set: "pd.DataFrame", settings: "Settings | None" = None, seed: i
     return {"model": iso, "features": feats, "bounds": [lo, hi], "scaler": scaler}
 
 
-def score(model: dict, inference_set: "pd.DataFrame") -> "pd.DataFrame":
+def score(model: dict, inference_set: pd.DataFrame) -> pd.DataFrame:
     """anomaly_score_raw ∈ [0,1] 산출(train 고정 스케일러·경계, 배치통계 미사용)."""
     iso = model["model"]
     feats = model["features"]

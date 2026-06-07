@@ -14,7 +14,6 @@ P1 코드리뷰 반영:
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 
 import pandas as pd
@@ -81,7 +80,7 @@ def check_formats(xwalk: pd.DataFrame, on_fail: str = "warn") -> list[str]:
     return issues
 
 
-def build_crosswalk(sources: "Sequence[pd.DataFrame]") -> pd.DataFrame:
+def build_crosswalk(sources: Sequence[pd.DataFrame]) -> pd.DataFrame:
     """여러 소스에서 corp_code 중심의 ID crosswalk 테이블을 구성한다.
 
     corp_code 를 가진 소스만 앵커로 사용한다. corp_code 별로 링크 키의 비결측값을 coalesce하되,
@@ -139,9 +138,9 @@ def build_crosswalk(sources: "Sequence[pd.DataFrame]") -> pd.DataFrame:
 
 
 def normalize_to_corp_code(
-    df: "pd.DataFrame",
+    df: pd.DataFrame,
     on: str,
-    crosswalk: "pd.DataFrame",
+    crosswalk: pd.DataFrame,
 ) -> pd.DataFrame:
     """``on`` 키(biz_reg_no/jurir_no/stock_code)를 crosswalk로 corp_code 로 정규화한다.
 
@@ -172,7 +171,7 @@ def normalize_to_corp_code(
     return out.merge(mapping, on=on, how="left")
 
 
-def unknown_ratio(df: "pd.DataFrame", key: str = CANONICAL_KEY) -> float:
+def unknown_ratio(df: pd.DataFrame, key: str = CANONICAL_KEY) -> float:
     """정규화 실패(키 결측) 비율을 반환한다(0.0~1.0). 빈 df면 0.0."""
     if len(df) == 0:
         return 0.0
@@ -180,7 +179,7 @@ def unknown_ratio(df: "pd.DataFrame", key: str = CANONICAL_KEY) -> float:
 
 
 def assert_coverage(
-    df: "pd.DataFrame",
+    df: pd.DataFrame,
     max_unknown_ratio: float,
     key: str = CANONICAL_KEY,
     on_fail: str = "raise",

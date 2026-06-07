@@ -72,7 +72,8 @@ def test_posterior_tilts_toward_view() -> None:
     # 자산0에 강한 상승 뷰(낮은 Ω=고신뢰) → 사후수익 자산0이 prior보다 상승
     sigma, pi, tau = _inputs()
     n = len(pi)
-    P = np.zeros((1, n)); P[0, 0] = 1.0
+    P = np.zeros((1, n))
+    P[0, 0] = 1.0
     Q = np.array([0.05])                            # prior 0.01 대비 강한 상승
     Omega = np.array([[1e-6]])                      # 고신뢰
     er = opt.posterior_expected_return({"Sigma": sigma, "pi": pi, "P": P, "Q": Q,
@@ -142,10 +143,12 @@ def test_optimize_infeasible_wmax_raises() -> None:
 
 def test_optimize_rejects_nonfinite() -> None:
     er, s = _opt_setup(5)
-    er2 = er.copy(); er2[0] = np.nan
+    er2 = er.copy()
+    er2[0] = np.nan
     with pytest.raises(ValueError):
         opt.optimize_weights(er2, s, w_max=0.5)     # NaN 마스킹 금지(리뷰 #4)
-    s2 = s.copy(); s2[0, 0] = np.inf
+    s2 = s.copy()
+    s2[0, 0] = np.inf
     with pytest.raises(ValueError):
         opt.optimize_weights(er, s2, w_max=0.5)
 

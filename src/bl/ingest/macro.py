@@ -46,7 +46,7 @@ def parse_ecos(payload: dict, metric_code: str) -> list[dict]:
     return out
 
 
-def collect_macro(settings: "Settings", start_ym: int, end_ym: int) -> pd.DataFrame:
+def collect_macro(settings: Settings, start_ym: int, end_ym: int) -> pd.DataFrame:
     """ECOS에서 매크로 시계열을 수집해 macro 프레임 반환(라이브, 키 필요)."""
     from bl.common.http import get_json
 

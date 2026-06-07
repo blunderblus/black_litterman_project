@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bl"
-version = "0.1.0"
+version = "0.3.0"
 description = "BL — AI 기반 Black-Litterman 법인 마케팅 최적화 시스템 (B2B 예금유치 자원배분)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 authors = [{ name = "BL Project" }]
 
 # 핵심 런타임 의존성. GPU(CuPy)는 optional extra(gpu)로 분리한다(설계: ADR-0001).
@@ -50,15 +50,22 @@ addopts = "-q"
 pythonpath = ["src"]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+# 대시보드 HTML/CSS/JS 템플릿 문자열 — 마크업 줄길이는 무의미(E501 면제)
+"src/bl/serve/dashboard_html.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.11"
 packages = ["bl"]
 ignore_missing_imports = true
 warn_unused_ignores = true
+# 과학/3rd-party 의존성 다수가 타입 스텁을 제공하지 않는다(xgboost·cvxpy·duckdb·requests 등).
+# ignore_missing_imports 의도와 일관되게 stub 부재(import-untyped)는 무시하고, bl 자체 코드만 타입체크한다.
+disable_error_code = ["import-untyped"]

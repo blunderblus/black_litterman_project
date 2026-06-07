@@ -26,7 +26,7 @@ Backend = Literal["cpu", "gpu"]
 def gpu_available() -> bool:
     """CuPy가 설치되어 있고 사용 가능한 CUDA 디바이스가 있으면 True."""
     try:
-        import cupy  # type: ignore
+        import cupy
 
         return cupy.cuda.runtime.getDeviceCount() > 0
     except Exception:
@@ -53,7 +53,7 @@ def get_array_module(preference: str | None = None) -> Any:
     >>> xp = get_array_module("cpu")  # -> numpy
     """
     if resolve_backend(preference) == "gpu":
-        import cupy  # type: ignore
+        import cupy
 
         return cupy
     return np
@@ -62,7 +62,7 @@ def get_array_module(preference: str | None = None) -> Any:
 def get_scipy_module(preference: str | None = None) -> Any:
     """활성 SciPy 모듈을 반환한다: cupyx.scipy(gpu) 또는 scipy(cpu)."""
     if resolve_backend(preference) == "gpu":
-        import cupyx.scipy as cpx  # type: ignore
+        import cupyx.scipy as cpx
 
         return cpx
     import scipy  # noqa: F401
@@ -78,7 +78,7 @@ def asarray(x: Any, preference: str | None = None) -> Any:
 def asnumpy(x: Any) -> np.ndarray:
     """배열을 NumPy로 내린다(CuPy면 cupy.asnumpy, 아니면 np.asarray)."""
     try:
-        import cupy  # type: ignore
+        import cupy
 
         if isinstance(x, cupy.ndarray):
             return cupy.asnumpy(x)

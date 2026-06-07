@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import duckdb
-    import pandas as pd
+
     from bl.common.config import Settings
 
 
-def ingest_post_data(con: "duckdb.DuckDBPyConnection", settings: "Settings") -> int:
+def ingest_post_data(con: duckdb.DuckDBPyConnection, settings: Settings) -> int:
     """내부 거래·잔액·관계를 corp_code로 정규화해 적재."""
     raise NotImplementedError("P1에서 구현 — 설계 문서 참조")

@@ -38,7 +38,7 @@ def parse_naver(payload: dict, corp_code: str) -> list[dict]:
     return out
 
 
-def collect_news(settings: "Settings", targets: list[tuple[str, str]], display: int = 20) -> pd.DataFrame:
+def collect_news(settings: Settings, targets: list[tuple[str, str]], display: int = 20) -> pd.DataFrame:
     """targets=[(corp_code, query)] 로 Naver 뉴스를 수집해 news 프레임 반환(라이브, 키 필요)."""
     from bl.common.http import get_json
 

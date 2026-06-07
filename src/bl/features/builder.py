@@ -37,12 +37,12 @@ _META = ["corp_code", "base_ym", "TIER", "sector_code", "group"]
 
 # 공시 가용월(YYYYMM) = base_ym + FIN_DISCLOSURE_LAG 개월 (정수 연월 산술)
 _AVAIL_YM = (
-    "(((CAST(base_ym/100 AS INT)*12 + (base_ym%100) - 1 + {lag})/12)*100 "
-    "+ ((CAST(base_ym/100 AS INT)*12 + (base_ym%100) - 1 + {lag})%12) + 1)"
-).format(lag=FIN_DISCLOSURE_LAG)
+    f"(((CAST(base_ym/100 AS INT)*12 + (base_ym%100) - 1 + {FIN_DISCLOSURE_LAG})/12)*100 "
+    f"+ ((CAST(base_ym/100 AS INT)*12 + (base_ym%100) - 1 + {FIN_DISCLOSURE_LAG})%12) + 1)"
+)
 
 
-def _run_features(con: "duckdb.DuckDBPyConnection") -> pd.DataFrame:
+def _run_features(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     """con 의 테이블(post_data/financial_wide/macro/target_master)로 피처 행렬 SQL 실행."""
     con.execute("""
         CREATE OR REPLACE TEMP VIEW _macro_wide AS
@@ -70,7 +70,8 @@ def _run_features(con: "duckdb.DuckDBPyConnection") -> pd.DataFrame:
         LAG(bal,3) OVER w AS bal_lag3,
         AVG(bal) OVER (PARTITION BY corp_code ORDER BY base_ym ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS bal_ma3,
         AVG(bal) OVER (PARTITION BY corp_code ORDER BY base_ym ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) AS bal_ma6,
-        stddev_samp(bal) OVER (PARTITION BY corp_code ORDER BY base_ym ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) AS bal_std6,
+        stddev_samp(bal) OVER (PARTITION BY corp_code ORDER BY base_ym
+                               ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) AS bal_std6,
         LEAD(bal,{LABEL_HORIZON}) OVER w AS bal_future_3m,
         CAST(trx_cnt_in_6m AS DOUBLE) AS trx_in,
         CAST(trx_cnt_out_6m AS DOUBLE) AS trx_out
@@ -136,6 +137,6 @@ def build_features_from_frames(
     return _split(df, base_ym)
 
 
-def build_features(con: "duckdb.DuckDBPyConnection", settings: "Settings", base_ym: int) -> dict:
+def build_features(con: duckdb.DuckDBPyConnection, settings: Settings, base_ym: int) -> dict:
     """DuckDB 테이블 → 피처 SQL 직접 실행(round-trip 없이 대용량 핫패스를 DuckDB가 처리)."""
     return _split(_run_features(con), base_ym)

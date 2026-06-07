@@ -105,14 +105,14 @@ def funding_gap(
 
 
 def compute_marketing_outputs(
-    df: "pd.DataFrame",
+    df: pd.DataFrame,
     *,
     total_aum: float | None = None,
     w_target_col: str = "target_weight",
     w_current_col: str = "current_weight",
     bal_col: str = "current_bal",
     tier_class_col: str = "tier_class",
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """마트 df에 weight_diff·marketing_score·action_guide·funding_gap 추가. total_aum 미지정 시
     current_bal(음수 제외) 합으로 추정. NaN 가중치는 거부, 0/극소·비유한 잔액은 매수 패밀리에서 제외."""
     out = df.copy()
@@ -158,7 +158,7 @@ def compute_marketing_outputs(
     return out
 
 
-def build_mart(con: "duckdb.DuckDBPyConnection", settings: "Settings", base_ym: int) -> "pd.DataFrame":
+def build_mart(con: duckdb.DuckDBPyConnection, settings: Settings, base_ym: int) -> pd.DataFrame:
     """DuckDB 메타 + BL 결과 결합 → bl_dashboard_mart(컬럼 권위 스키마 02 §3.2.3, bl_return/pi/q/omega/
     market_weight 포함). 엔진/메타 연동 후 구현(현재는 compute_marketing_outputs 직접 사용). pickle 금지."""
     raise NotImplementedError(

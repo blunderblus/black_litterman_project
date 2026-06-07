@@ -45,7 +45,7 @@ def _clean(v):
 
 
 def export_dashboard_json(
-    mart: "pd.DataFrame",
+    mart: pd.DataFrame,
     out_dir: str | Path,
     top_n: int = 200,
     metadata: dict | None = None,

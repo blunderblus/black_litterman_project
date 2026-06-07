@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-def fit_scaler(df: "pd.DataFrame", cols: list[str], path: str | Path | None = None) -> dict:
+def fit_scaler(df: pd.DataFrame, cols: list[str], path: str | Path | None = None) -> dict:
     """train df의 cols에 대해 z-score 파라미터 {col:[mean,std]} 적합. path 주면 JSON 저장."""
     params: dict[str, list[float]] = {}
     for c in cols:
@@ -38,7 +38,7 @@ def load_scaler(path: str | Path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def apply_scaler(df: "pd.DataFrame", scaler: dict | str | Path) -> "pd.DataFrame":
+def apply_scaler(df: pd.DataFrame, scaler: dict | str | Path) -> pd.DataFrame:
     """저장된 train 기준 파라미터로만 표준화한다(현재 배치 통계 사용 금지)."""
     params = scaler if isinstance(scaler, dict) else load_scaler(scaler)
     out = df.copy()

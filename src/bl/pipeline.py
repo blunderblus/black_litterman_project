@@ -140,8 +140,23 @@ def run_demo(
                                  top_n=top_n, seed=seed, render=render, source="synthetic-demo")
 
 
+def run_from_frames(
+    frames: dict, *, base_ym: int = DEFAULT_BASE_YM, seed: int = 42,
+    render: bool = False, source: str = "frames",
+    tau: float | None = None, axis_weights: dict | None = None, omega_scale: float = 1.0,
+) -> dict:
+    """프레임(데모/실데이터/백테스트 공통) → 전체 BL 파이프라인 1회 실행(공개 진입점).
+
+    렌더 없이(기본) mart 만 반환하므로 백테스트·오프라인 평가가 시점별로 반복 호출한다.
+    tau/axis_weights/omega_scale 은 BL 하이퍼파라미터 override(eval.calibrate 가 실현지표로 역산).
+    """
+    return _pipeline_from_frames(frames, base_ym=base_ym, seed=seed, render=render, source=source,
+                                 tau=tau, axis_weights=axis_weights, omega_scale=omega_scale)
+
+
 def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, top_n=200,
-                          seed=42, render=True, source="live") -> dict:
+                          seed=42, render=True, source="live",
+                          tau=None, axis_weights=None, omega_scale=1.0) -> dict:
     """프레임(데모/실데이터 공통) → features→models→BL→마트→대시보드. 동일 다운스트림."""
     # features → models
     feat = build_features_from_frames(
@@ -166,7 +181,10 @@ def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, to
 
     # BL 입력 → 사후수익 → 최적화 (뷰 스케일러 명시 주입: 배치 z-score 폴백 경로 제거)
     scaler = _view_scaler(assets)
-    inp = bi.assemble_bl_inputs(assets, panel, scaler=scaler)
+    bl_kwargs: dict = {"axis_weights": axis_weights, "omega_scale": omega_scale}
+    if tau is not None:
+        bl_kwargs["tau"] = tau
+    inp = bi.assemble_bl_inputs(assets, panel, scaler=scaler, **bl_kwargs)
     er = opt.posterior_expected_return(inp)
     sigma_post = opt.posterior_covariance(inp)
     w = opt.optimize_weights(er, sigma_post, w_max=0.10)
@@ -260,11 +278,18 @@ def load_frames(settings, sample_dir: str | Path = "data/sample", raw_dir: str |
             if news is not None and len(news) else None)
 
     sample = _load_sample(sample_dir) if (fin is None or mac is None or sent is None) else None
+
+    def _pick(val, key):
+        if val is not None:
+            return val
+        assert sample is not None  # 위 조건상 결측이 있으면 sample 로드 보장(타입 내로잉)
+        return sample[key]
+
     return {
         "target_master": tm, "post_data": post,
-        "financial_wide": fin if fin is not None else sample["financial_wide"],
-        "macro": mac if mac is not None else sample["macro"],
-        "company_sentiment": sent if sent is not None else sample["company_sentiment"],
+        "financial_wide": _pick(fin, "financial_wide"),
+        "macro": _pick(mac, "macro"),
+        "company_sentiment": _pick(sent, "company_sentiment"),
     }
 
 
