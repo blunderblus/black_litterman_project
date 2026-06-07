@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from bl.common.dates import ym_add
 from bl.common.io import write_parquet
 
 # 기준월(YYYYMM) — 24개월, 202510 종료(프로젝트 base_ym=202510)
@@ -163,6 +164,93 @@ def generate_demo(
     for name, df in artifacts.items():
         paths[name] = write_parquet(df, out / f"{name}.parquet")
     return paths
+
+
+def generate_treatment_scenario(
+    *,
+    seed: int = 0,
+    n: int = 200,
+    true_uplift: float = 0.08,
+    base_ym: int = 202506,
+    horizon: int = 3,
+    assignment: str = "observational",
+    selection_strength: float = 1.6,
+    prosperity_size_coef: float = 0.02,
+    base_drift: float = 0.0,
+    noise: float = 0.03,
+    pretrend_coef: float = 0.0,
+    run_ts: str = "SCN",
+) -> dict:
+    """검증용 합성 처치 시나리오 — 알려진 true_uplift + 처치배정 + 번영(size상관 drift)을 심는다.
+
+    설계 의도(serve.ledger.score_ledger_uplift 식별 3분기를 *테스트로 검증* 가능하게):
+      각 법인에 잠재 size(=선택·번영 공통 교란원)를 부여하고, baseline 월 drift μ_i 를 size 에 비례
+      시킨다(번영 = 가만둬도 size 큰 법인이 더 큰다). 처치는 assignment 에 따라 배정한다:
+        - "observational": logit(처치)=selection_strength·size → 큰 법인일수록 처치확률↑(★선택편향).
+                           holdout 없음. raw 단순차이는 편향(번영 혼입), DiD/매칭은 편향 제거를 검증.
+        - "rct"          : 무작위 배정(size 무관) + holdout_flag 기록 → RCT 가 true_uplift 복원 검증.
+        - "none"         : 처치정보 전부 null → 폴백(prosperity_proxy) 정직성 검증.
+
+    잔액 경로: pre→base 성장 = μ_i·h(번영) + treated·pretrend_coef(평행추세 위반항), base→future
+    성장 = μ_i·h + treated·true_uplift. pretrend_coef=0(기본)이면 DiD(post−pre)가 법인별 μ_i·h(번영)를
+    차분 소거하고 treated·true_uplift 만 남긴다. pretrend_coef≠0 이면 처치군이 *pre 에서도* 더(덜) 성장해
+    평행추세 가정이 깨지고 DiD 가 true_uplift 에서 −pretrend_coef 만큼 편향된다(가정이 load-bearing 임을 검증).
+
+    반환 {ledger_df, post_data, true_uplift, params}. ledger_df 는 score_ledger_uplift 입력 형식
+    (run_ts/base_ym/corp_code + 안정적 권고 메타 current_bal/market_weight + 처치 레이어).
+    """
+    if assignment not in ("observational", "rct", "none"):
+        raise ValueError(f"assignment 은 observational|rct|none 중 하나여야 함: {assignment!r}")
+    rng = np.random.default_rng(seed)
+    corp = [f"S{i:06d}" for i in range(n)]
+    size = rng.standard_normal(n)                          # 표준화 size(선택·번영 공통 교란원)
+    bal_pre = np.exp(13.0 + 0.8 * size)                    # 시작잔액(size 단조)
+    mu = base_drift + prosperity_size_coef * size          # 월 baseline drift(번영, size 상관)
+
+    if assignment == "rct":                                # 무작위 배정(size 무관) — holdout 기록
+        treated = rng.integers(0, 2, n).astype("float64")
+        holdout = 1.0 - treated                            # holdout_flag=1 = 보류(control)
+    elif assignment == "observational":                    # size 의존 처치(선택편향), holdout 없음
+        p = 1.0 / (1.0 + np.exp(-selection_strength * size))
+        treated = (rng.uniform(0, 1, n) < p).astype("float64")
+        holdout = np.full(n, np.nan)
+    else:                                                  # none — 처치정보 전무
+        treated = np.full(n, np.nan)
+        holdout = np.full(n, np.nan)
+
+    eff = np.where(np.isnan(treated), 0.0, treated)        # 미기록=비처치로 잔액 생성
+    # pre 성장 = 번영 + (평행추세 위반 시) 처치군 pre-trend 발산. post 성장 = 번영 + 처치 uplift.
+    r_pre = mu * horizon + eff * pretrend_coef + rng.normal(0, noise, n)
+    r_post = mu * horizon + eff * true_uplift + rng.normal(0, noise, n)
+    bal_base = bal_pre * np.exp(r_pre)
+    bal_future = bal_base * np.exp(r_post)
+
+    pre_ym, fut_ym = ym_add(base_ym, -horizon), ym_add(base_ym, horizon)
+    post_data = pd.DataFrame({
+        "corp_code": corp * 3,
+        "base_ym": [pre_ym] * n + [base_ym] * n + [fut_ym] * n,
+        "bal": np.concatenate([bal_pre, bal_base, bal_future]),
+    })
+    ledger_df = pd.DataFrame({
+        "run_ts": run_ts,
+        "base_ym": base_ym,
+        "corp_code": corp,
+        "current_bal": bal_base,                           # 안정적 권고 메타(매칭 공변량; size 단조)
+        "market_weight": bal_base / float(bal_base.sum()),
+        "treated": treated,
+        "treat_ym": np.where(np.isnan(treated), np.nan, float(base_ym)),
+        "treat_channel": ["price" if e == 1.0 else None for e in eff],
+        "holdout_flag": holdout,
+    })
+    return {
+        "ledger_df": ledger_df,
+        "post_data": post_data,
+        "true_uplift": float(true_uplift),
+        "params": {"seed": seed, "n": n, "assignment": assignment, "horizon": horizon,
+                   "selection_strength": selection_strength,
+                   "prosperity_size_coef": prosperity_size_coef, "noise": noise,
+                   "pretrend_coef": pretrend_coef},
+    }
 
 
 if __name__ == "__main__":
