@@ -1,0 +1,45 @@
+# ---- secrets / config ----
+.env
+*.key
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ---- data / artifacts (실데이터·산출물은 버전관리 제외; 합성 샘플만 예외) ----
+data/raw/*
+data/interim/*
+data/processed/*
+data/artifacts/*
+!data/**/.gitkeep
+# 공개 가능한 합성 샘플데이터는 추적한다.
+!data/sample/
+data/sample/*
+!data/sample/.gitkeep
+!data/sample/*.parquet
+!data/sample/*.json
+
+# ---- 대시보드 빌드 산출물(대용량 HTML) ----
+*.html
+!docs/**/*.html
+
+# ---- 분석/마이그레이션 임시 산출물 ----
+wf_result.json
+wf_review_result.json
+_backup_docs_*/
+extracted/
+*.zip
+
+# ---- OS / editor ----
+.DS_Store
+.idea/
+.vscode/

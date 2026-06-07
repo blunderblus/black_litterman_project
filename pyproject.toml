@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bl"
+version = "0.1.0"
+description = "BL — AI 기반 Black-Litterman 법인 마케팅 최적화 시스템 (B2B 예금유치 자원배분)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "BL Project" }]
+
+# 핵심 런타임 의존성. GPU(CuPy)는 optional extra(gpu)로 분리한다(설계: ADR-0001).
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2.1",
+    "pyarrow>=14",          # parquet
+    "duckdb>=0.10",         # 수집/적재(OLAP)
+    "pydantic>=2.5",
+    "pydantic-settings>=2.1",
+    "scikit-learn>=1.4",    # IsolationForest, LedoitWolf, 캘리브레이션
+    "xgboost>=2.0",         # 성장/이탈 분류
+    "cvxpy>=1.4",           # convex QP 최적화 (OSQP/ECOS)
+    "requests>=2.31",       # DART/ECOS/Naver/BigKinds REST
+    "finance-datareader>=0.9",
+    "google-generativeai>=0.5",  # Gemini 2.5 Flash-Lite
+    "kiwipiepy>=0.17",      # 한국어 형태소(뉴스 키워드)
+]
+
+[project.optional-dependencies]
+# GPU 가속(선택). 환경에 맞는 CUDA 빌드를 설치한다. 미설치 시 CPU(NumPy)로 자동 폴백.
+gpu = ["cupy-cuda12x>=13"]
+dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.9", "pandera>=0.18"]
+
+[project.scripts]
+# 얇은 CLI 엔트리포인트(로직은 모듈에). 예: `bl-run universe`
+bl-run = "bl.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bl = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["bl"]
+ignore_missing_imports = true
+warn_unused_ignores = true
