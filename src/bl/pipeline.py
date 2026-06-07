@@ -61,25 +61,17 @@ def _returns_panel(
 
 
 def _view_scaler(assets: pd.DataFrame) -> dict:
-    """뷰 3축 raw 신호의 (mean,std) — build_views.axis_raw 와 동일 정의(단면 표준화 명시화).
+    """레지스트리 뷰별 raw 신호의 (mean,std) — VIEW_REGISTRY.signal 과 동일 정의(단면 표준화 명시화).
 
     배치 z-score 폴백 경로(추론 누수 경고)를 제거하고, 단면 표준화를 의도된 스케일러로 주입한다.
-    anomaly 는 뷰 축이 아니라 Ω 신뢰도 변조 요인이므로 여기(뷰 스케일러)에 포함하지 않는다.
+    뷰는 레지스트리(현 news·pattern)만 — relationship 은 Σ 이동성 슬롯 예약(뷰 아님), anomaly 는
+    Ω 신뢰도 요인(뷰 아님)이므로 여기(뷰 스케일러)에 포함하지 않는다.
     """
-    n = len(assets)
-
-    def col(name: str) -> np.ndarray:
-        return assets[name].fillna(0).to_numpy("float64") if name in assets.columns else np.zeros(n)
-
-    axes = {
-        "news": col("gemini_score"),
-        "pattern": col("prob_growth_raw") - col("prob_churn_raw"),
-        "relationship": col("relationship_score"),
-    }
     out: dict = {}
-    for k, v in axes.items():
-        sd = float(np.std(v))
-        out[k] = (float(np.mean(v)), sd if sd > 1e-12 else 1.0)
+    for v in bi.VIEW_REGISTRY:
+        raw = np.asarray(v.signal(assets), dtype="float64")
+        sd = float(np.std(raw))
+        out[v.name] = (float(np.mean(raw)), sd if sd > 1e-12 else 1.0)
     return out
 
 
@@ -141,20 +133,22 @@ def run_demo(
 def run_from_frames(
     frames: dict, *, base_ym: int = DEFAULT_BASE_YM, seed: int = 42,
     render: bool = False, source: str = "frames",
-    tau: float | None = None, axis_weights: dict | None = None, omega_scale: float = 1.0,
+    tau: float | None = None, view_corr: float | None = None, omega_scale: float = 1.0,
     gamma_anom: float | None = None, lambda_fixed: float | None = None,
     ledger_path: str | None = None, run_ts: str | None = None,
 ) -> dict:
     """프레임(데모/실데이터/백테스트 공통) → 전체 BL 파이프라인 1회 실행(공개 진입점).
 
     렌더 없이(기본) mart 만 반환하므로 백테스트·오프라인 평가가 시점별로 반복 호출한다.
-    tau/axis_weights/omega_scale/gamma_anom/lambda_fixed 은 **정책 손잡이**(보수↔공격) override —
+    tau/view_corr/omega_scale/gamma_anom/lambda_fixed 은 **정책 손잡이**(보수↔공격) override —
     None 이면 모듈 기본 보수값 사용, eval.calibrate 가 실현지표로 역산. lambda_fixed = 앵커 Π 스케일
     정규화 상수(None→engine.inputs.LAMBDA_FIXED); τ↑·λ_fix↓·γ_anom↓ 가 공격 방향(설계 §5.5, REPORT).
+    view_corr = 뷰 off-diagonal Ω 상관(None→경험 신호상관 프록시); ↑ = 번영뷰 중복 강조(보수, 앵커↑),
+    ↓ = 독립확증(공격, 앵커↓). E3a 비계의 뷰 결합 손잡이(E3b 캘리브레이션 자리).
     ledger_path 지정 시 권고를 append 원장에 적재한다(serve.ledger, 묶임줄 발행 기록).
     """
     result = _pipeline_from_frames(frames, base_ym=base_ym, seed=seed, render=render, source=source,
-                                   tau=tau, axis_weights=axis_weights, omega_scale=omega_scale,
+                                   tau=tau, view_corr=view_corr, omega_scale=omega_scale,
                                    gamma_anom=gamma_anom, lambda_fixed=lambda_fixed)
     if ledger_path:
         _log_to_ledger(result, ledger_path, run_ts)
@@ -173,7 +167,7 @@ def _log_to_ledger(result: dict, ledger_path: str, run_ts: str | None) -> None:
 
 def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, top_n=200,
                           seed=42, render=True, source="live",
-                          tau=None, axis_weights=None, omega_scale=1.0, gamma_anom=None,
+                          tau=None, view_corr=None, omega_scale=1.0, gamma_anom=None,
                           lambda_fixed=None) -> dict:
     """프레임(데모/실데이터 공통) → features→models→BL→마트→대시보드. 동일 다운스트림."""
     # features → models
@@ -199,7 +193,7 @@ def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, to
 
     # BL 입력 → 사후수익 → 최적화 (뷰 스케일러 명시 주입: 배치 z-score 폴백 경로 제거)
     scaler = _view_scaler(assets)
-    bl_kwargs: dict = {"axis_weights": axis_weights, "omega_scale": omega_scale,
+    bl_kwargs: dict = {"view_corr": view_corr, "omega_scale": omega_scale,
                        "gamma_anom": gamma_anom, "risk_aversion": lambda_fixed}  # λ_fix override
     if tau is not None:
         bl_kwargs["tau"] = tau
@@ -228,8 +222,10 @@ def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, to
         "anomaly_score_raw": assets.get("anomaly_score_raw", pd.Series(np.full(n, np.nan))),
         "news_sentiment": assets["gemini_score"],
         "pi": inp["pi"],
-        "q": inp["Q"],
-        "omega": np.diag(inp["Omega"]),
+        # 블록스택(E3a): q/omega 는 법인당 K개이므로, 로깅·대시보드 역방향 호환을 위해 **결합 단일뷰
+        # 등가**(q_eff,omega_eff: 블록스택과 동일 사후를 내는 단일뷰값)를 법인당 스칼라로 보존한다.
+        "q": inp["q_eff"],
+        "omega": inp["omega_eff"],
     })
     mart = mart_mod.compute_marketing_outputs(
         mart, total_aum=float(np.nansum(assets["current_bal"]))

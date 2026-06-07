@@ -19,17 +19,16 @@ def test_sweep_tau_structure() -> None:
     assert best.get("tau") in (0.05, 0.1)
 
 
-def test_calibrate_axis_weights_structure() -> None:
+def test_calibrate_view_corr_structure() -> None:
+    # E3a: 손가중 축그리드(calibrate_axis_weights) 폐기 → 뷰 off-diag 상관 ρ_view 캘리브레이션(E3b 자리).
     frames = _load_sample("data/sample")
-    grid = [dict(cal.AXIS_WEIGHTS),
-            {"news": 0.30, "pattern": 0.50, "relationship": 0.20}]
-    df, best = cal.calibrate_axis_weights(frames, grid=grid, step=6)
+    grid = (None, 0.6)                                    # 경험프록시 vs 고정 ρ_view
+    df, best = cal.calibrate_view_corr(frames, grid=grid, step=6)
     assert len(df) == 2
-    assert {"news", "pattern", "relationship", "mean_ic"} <= set(df.columns)
-    assert "anomaly" not in df.columns                    # anomaly 는 뷰 축이 아님(E2 이전)
+    assert {"view_corr", "mean_ic", "lift_bl_vs_market"} <= set(df.columns)
+    assert set(df["view_corr"]) == {"empirical", 0.6}     # None→'empirical' 라벨
     assert np.isfinite(best["mean_ic"])
-    s = best["news"] + best["pattern"] + best["relationship"]
-    assert np.isclose(s, 1.0)                              # 최적 축가중도 합=1(3축)
+    assert best["view_corr"] in ("empirical", 0.6)
 
 
 def test_calibrate_omega_scale_structure() -> None:

@@ -30,6 +30,10 @@ log = get_logger(__name__)
 LEDGER_TABLE = "recommendation_log"
 LEDGER_KEYS = ["run_ts", "base_ym", "corp_code"]
 # 원장에 보존할 권고 필드(후일 실현수익 조인·재캘리브레이션 입력). mart 에 있는 것만 적재.
+# q/omega(E3a): 뷰 블록스택(법인당 K뷰) 하에서도 **법인당 스칼라**를 유지하기 위해, 블록스택과 동일
+# 사후를 내는 *결합 단일뷰 등가*(q_eff/omega_eff)를 로깅한다(per-view 보조테이블 대신 결합 스칼라 선택,
+# additive·역방향 호환 — primary 원장의 target_weight/bl_return 은 불변). per-view 분해가 필요하면
+# inputs metadata(view_names·q_scale·c_cal·view_corr)에서 별도 보조테이블로 확장(E3b).
 _LOG_COLS = [
     "corp_code", "corp_name", "tier", "current_bal", "current_weight",
     "market_weight", "target_weight", "weight_diff", "bl_return",

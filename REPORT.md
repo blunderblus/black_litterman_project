@@ -1,164 +1,154 @@
-# C3 해소 — 앵커 λ를 "캘리브레이션 파라미터"에서 "Π 스케일 정규화 상수"로 강등
+# E3a — 뷰 레지스트리 비계(scaffold): 단일 Q 병합 → 블록스택 독립뷰 구조
 
-브랜치: `c3-lambda-normalization` · 작업일: 2026-06-07
+작업일: 2026-06-08 · 선행: C3(`6ce82e5`)·E2(`e850a5f`) 머지 위에 적층 · (C3 보고는 git history)
 
 ## 0. 한 줄 결론
 
-**λ는 더 이상 캘리브레이션하지 않는다. 앵커(Π)를 뷰(Q)와 동일 스케일로 명시 정규화하는 무차원 상수
-(`LAMBDA_FIXED=0.25`)로 고정하고, 앵커↔뷰 균형(=영업 공격성)은 `τ` 하나로 일원화했다(식별 불가 문제 제거).**
+**뷰를 '축가중 단일병합 Q'에서 '뷰 레지스트리 블록스택'($P=[I;I]$, 뷰별 단위정합 $Q$ 블록, per-view $\Omega$
++ off-diagonal 뷰상관)으로 재구성했다. 이 비계는 *기본 경로(경험 프록시)에서 융합 동작을 실질 보존한다*
+— 단일병합 대비 target_weight Spearman 0.87·top-5 4/5(경험적 동등성, §4), off-diagonal이 두 번영뷰
+(news·pattern)의 독립확증 과신을 상쇄한다. (정확히는 per-view ω 가 같을 때만 off-diag가 방향에 불변이고,
+운영 경로의 상이 conf에서는 작은 ρ 기본값이 동등성을 떠받친다 — §3.) relationship 은 방향 뷰가 아니라
+현재상태=이동성이라 뷰에서 빼 $\Sigma$ 이동성 슬롯으로 예약(E1b 대기)했고, 미래뷰는 한 줄 등록으로 꽂히는
+플러그인 자리를 열었다. 정지조건 미발동.**
 
 ## 1. 변경 요약
 
 | 파일 | 변경 |
 | --- | --- |
-| `engine/inputs.py` | `calibrate_lambda()`·`LAMBDA_CLIP`·`rf` 인자 제거. `LAMBDA_FIXED`·`TAU_REF` 도입. Π를 Σw_mkt 방향 유지 + Q(τ_ref) 스케일로 정규화. `risk_aversion`→λ override(테스트용)로 의미 변경(None이면 `LAMBDA_FIXED`). metadata에 `lambda_effective`(Σw_mkt 실효 배수) 추가. `"lambda"` 키 유지(대시보드/로그). |
-| `engine/optimize.py` | `risk_aversion`(자리2, mean_variance 전용)이 inputs.py 앵커 λ와 무관함을 명시(주석). 로직 불변. stale "λ 캘리브레이션([1,5]) 미구현" 언급 정리. |
-| `tests/test_inputs.py` | `LAMBDA_CLIP`·`λ∈[1,5]` 테스트 제거. λ 고정·override·Π 정규화·**τ 단조성**(앵커↔뷰 손잡이) 테스트 추가. |
-| 문서 | `docs/design/03` §4.2/§5.5/§7.1, `README` 핵심수식: λ를 "위험회피/내재균형 역산"→"Π 스케일 정규화 상수"로 수정. τ 민감도 해석표(공격/균형/보수) 추가. "균형(equilibrium)"→"무위 기본값(do-nothing default)". |
+| `engine/inputs.py` | `ViewSpec`·`VIEW_REGISTRY`([news,pattern]) 도입. `assemble_bl_inputs`: $P=[I;I]$ 블록스택(KN×N), 뷰별 단위정합 $Q$ 블록 쌓기, per-view $\Omega$ 대각(news=gemini_conf·pattern=conf_growth, E4 부분개선) + **off-diagonal** $R^{\text{view}}\sqrt{\omega_a\omega_b}$. 결합 단일뷰 등가 `q_eff`/`omega_eff` 산출. `build_views`/`AXIS_WEIGHTS`(손가중) 제거 → `build_view_signals`. `view_corr` 인자(off-diag 손잡이) + PSD-clip(`VIEW_CORR_MAX=0.98`). |
+| `engine/optimize.py` | 변경 없음 — `_parse_inputs` 가 이미 $P$를 K×N 일반형(K=뷰수)으로 처리, KN×KN $\Omega$ 와 KN×KN solve 정상 동작(엔진 불요 확인). |
+| `pipeline.py` | `_view_scaler` 를 레지스트리 정렬(relationship 제외). `axis_weights`→`view_corr` 손잡이 스레딩. mart `q`/`omega` = `q_eff`/`omega_eff`(법인당 스칼라, 역방향 호환). |
+| `eval/backtest.py`·`calibrate.py` | `axis_weights`→`view_corr` 스레딩. `calibrate_axis_weights`(손가중 그리드)→**`calibrate_view_corr`**(off-diag 상관 그리드, E3b 자리). `DEFAULT_AXIS_GRID`→`DEFAULT_VIEW_CORR_GRID`. |
+| `serve/ledger.py` | q/omega 가 결합 단일뷰 등가(법인당 스칼라)임을 문서화(additive·역방향 호환, primary 원장 불변). |
+| 테스트 | 블록스택 KN×N·등-ω 방향불변·ω상이 방향조절(정직)·플러그인 기여·결합등가(view_corr 가변)·off-diag PSD 추가. **132→142 pass.** |
+| 문서 | README·`docs/design/03` §2.1/§5(전면)/§9.2/§11·`01`·`02`·`planning 01/02/03`·`concept 01-04`·`ADR-0004`·`glossary` — 뷰 레지스트리·off-diag·relationship→Σ 예약으로 일괄 갱신(적대적 멀티에이전트 스윕). |
 
-핵심 수식(이전 → 이후):
+## 2. 구조 변경도
 
 ```
-이전:  λ = clip( (E[r_mkt]−r_f)/σ²_mkt , [1,5] );   Π = λ·Σ·w_mkt
-이후:  Π = LAMBDA_FIXED · √(τ_ref·meanΣ) · (Σw_mkt / rms(Σw_mkt))      # ‖Π‖ = λ·‖Q(τ_ref)‖
-       (Σw_mkt 방향=shape 보존, 스케일만 뷰 Q 에 정규화, τ_ref=0.05 고정 → Π는 런타임 τ 무관)
+[E3a 전] 단일 병합 Q (법인당 1뷰)
+  news,pattern,relationship 3축 → 손가중 a(0.412,0.412,0.176) 가중합 → 단위정합 → Q(N) ; P=I(N×N) ; Ω=diag(N)
+
+[E3a 후] 뷰 레지스트리 블록스택 (법인당 K뷰)
+  VIEW_REGISTRY=[news, pattern]                     relationship → Σ 이동성 슬롯 예약(E1b)
+  뷰별 표준화 z_v → 블록별 단위정합 Q_v(Var=τ·meanΣ) anomaly → Ω 요인(E2, 모든 뷰 공통 곱)
+        ↓ 쌓기(가중합 X)
+  P = [I; I]  (KN×N)   Q = [Q_news; Q_pattern] (KN)
+  Ω (KN×KN):  대각 = per-view (DRI·conf_v·anomaly)         ← 뷰별 confidence (E4 부분개선)
+              off-diag(a,b) = R_view[a,b]·√(ω_a·ω_b)        ← 두 번영뷰 상관 → 과신 상쇄
+        ↓ (로깅·대시보드용) 결합 단일뷰 등가
+  q_eff = 1ᵀG⁻¹q / 1ᵀG⁻¹1,  omega_eff = 1/(1ᵀG⁻¹1)   (블록스택과 *동일* 사후를 내는 단일뷰)
 ```
 
-단위정합으로 `Q∝√τ · Ω∝τ` 라 `W=τΣ(τΣ+Ω)⁻¹` 는 τ 무관이고, Π를 τ 무관 스케일로 고정하므로
-`τ↑→뷰 지배(공격적) · τ↓→앵커 지배(보수적)` 가 단조 성립한다.
+엔진(`posterior_expected_return`)은 $E[R]=\Pi+\tau\Sigma P^\top(P\tau\Sigma P^\top+\Omega)^{-1}(Q-P\Pi)$ 의
+K×K(=KN) solve 로 변경 없이 동작(K=2N=72 @데모, 조건수 건전).
 
-## 2. 왜 강행(단순 λ 고정)이 아니라 정규화인가 — escape hatch 진단
+## 3. 동작 동등의 수학 (왜 비계가 융합동작을 안 바꾸나 — 그리고 그 *조건*)
 
-작업 지시의 정지 조건(`‖Π‖ ≪ ‖Q‖`)이 **현 기본동작에서 이미 트립**되어, 사용자 확인 후 Option B(정규화)로 진행함.
+$P=[I;I]$ 에서 자산 $i$의 뷰 블록 $G_i=\text{diag}(\sqrt{\omega})R^{\text{view}}\text{diag}(\sqrt{\omega})$ 에 대해
+결합 뷰값 $q_{\text{eff},i}=\dfrac{\mathbf 1^\top G_i^{-1}q_i}{\mathbf 1^\top G_i^{-1}\mathbf 1}$, 결합 정밀도 $\mathbf 1^\top G_i^{-1}\mathbf 1$:
 
-- 합성·실데이터의 시장 잔액수익이 **음(−)** 이라 역최적화 λ = mean(r_mkt)/σ²_mkt 가 **항상 음수**
-  (demo −97.18, backtest 12윈도우 −83.97~−91.09) → `[1,5]` 클립이 **전 13/13 윈도우를 하한 1.0으로 강제**.
-  즉 `calibrate_lambda` 는 이 데이터에서 사실상 상수 1.0을 뱉어 왔고, "캘리브레이션"이 아니었다.
-- 그 결과 기본 τ=0.05에서 `‖Π‖=1.65e-3 ≪ ‖Q‖=0.103` (비율 0.016), **앵커 사후기여 2.8%**
-  (precision-form §9.2), `‖E[R]−Π‖/‖Π‖=24` → 앵커가 사실상 증발.
-- 앵커를 의미 있게 만들려면 λ≈62(=‖Q‖/‖Σw_mkt‖)가 필요한데, 이는 위험회피계수로 설명 불가 →
-  λ는 추정 대상이 아니라 **스케일 정규화 상수**라는 결론을 데이터가 입증.
+- **등-ω 특수케이스(엄밀)**: $\omega_{a}=\omega_{b}=\omega$ 이면 $q_{\text{eff}}=\dfrac{q_1+q_2}{2}$ = **per-view 평균**으로
+  off-diagonal $\rho$ 와 **무관**(방향 불변), 결합 정밀도 $=\dfrac{2}{\omega(1+\rho)}$ 만 $\rho$ 가 조절. 이때만 "off-diag는
+  과신만 규제, 방향 보존"이 *정확히* 성립.
+- **일반(운영) 경로**: 뷰별 confidence 가 상이($\omega_a\neq\omega_b$; news=gemini_confidence·pattern=
+  confidence_growth, E4)하면 $q_{\text{eff}}$ 는 **정밀도가중 혼합**이라 off-diag 가 *방향(q_eff)도* 조절한다.
+  즉 단일병합과의 동작 동등(랭킹 보존)은 **무조건 불변량이 아니라 기본 경로(경험 프록시 ρ가 작음)에서
+  성립하는 *경험적* 속성**이다(§4 측정). $\rho{=}0$=독립계상($K$배 과신=E1 회귀)↔$\rho{\to}1$=특이 Ω 직전(조건수
+  폭주, VIEW_CORR_MAX 차단). ω 상이 + 큰 ρ 에서는 랭킹이 오히려 더 흔들린다(§4 sweep ρ=0.9→0.847·0.95→0.696).
 
-## 3. LAMBDA_FIXED 동결 근거 (측정)
+→ 따라서 **기본값을 경험 프록시(작은 ρ)로 두는 것이 동등성 보존의 핵심**이다. 한편 결합 등가
+$(q_{\text{eff}},\omega_{\text{eff}})$ 단일뷰의 BL 사후가 블록스택과 **정확히 일치**함은 ρ 무관하게 성립한다(테스트
+`test_combined_stats_reproduce_blockstack_posterior`) — 이는 '블록스택이 *어떤* 단일뷰로 환원됨'(로깅 정당성)이지
+'그 단일뷰가 *과거 병합과 같음*'은 아니다. 후자가 §4의 경험 측정 대상이다.
 
-demo 데이터에서 λ를 스윕하며 기본 τ=0.05의 앵커 사후기여(precision-form §9.2)를 측정.
-**목표: ~30% (권고 20–50%, 앵커가 증발도 지배도 아닌 카운터웨이트).**
+## 4. 동작 동등 증거 (demo, 단일병합 대비 블록스택)
 
-| λ (=‖Π‖/‖Q‖ @τ_ref) | 앵커 사후기여 @τ=0.05 |
-| --- | --- |
-| 0.25 | **30.9%**  ← 동결값 |
-| 0.30 | 35.2% |
-| 0.50 | 47.5% |
-| 1.00 | 64.4% |
-| (이전: λ→1.0 클립) | 2.8% (증발) |
+| view_corr | Spearman(target_weight) | Spearman(marketing) | top-5 | top-10 | 앵커기여@τ.05 | K×K 조건수 | max wᵢ |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| (E3a 전 단일병합) | 1.000 | 1.000 | 5/5 | 10/10 | **0.440** | 137 | 0.10 |
+| **empirical(ρ≈0.18, 기본)** | **0.865** | 0.886 | 4/5 | 8/10 | 0.374 | 283 | 0.10 |
+| 0.0 (대각=이중계상) | 0.897 | 0.921 | 4/5 | 8/10 | 0.354 | 213 | 0.10 |
+| 0.3 | 0.930 | 0.910 | 4/5 | 8/10 | 0.392 | 345 | 0.10 |
+| 0.6 (데모 동등성 최적) | 0.943 | 0.918 | 5/5 | 8/10 | 0.402 | 780 | 0.10 |
+| 0.9 | 0.847 | 0.831 | 3/5 | 6/10 | 0.317 | 3450 | 0.10 |
+| 0.95 | 0.696 | 0.774 | 1/5 | 5/10 | 0.251 | 7273 | 0.10 |
 
-→ `LAMBDA_FIXED = 0.25` 동결. 앵커 사후기여 30.9% (목표 적중).
+- **랭킹상관 높음**(기본 0.865, C3가 수용한 0.785 상회), **max wᵢ 캡유지**(과신·극단가중 없음).
+- $\rho{\to}1$ 은 동등성을 **악화**(랭킹 0.70·조건수 7273) — 완전중복=특이 Ω 의 수치 병리. 즉 동등성은
+  $\rho{\approx}0.6$ 에서 최대이고 그 이상은 PSD/조건수가 깨진다(정지조건이 가리키는 지점).
 
-## 4. τ 민감도 — τ가 유일한 앵커↔뷰 손잡이로 작동 (검증)
+**동등성 분해**(같은 Σ/Π/optimizer, demo):
 
-| τ | 영업 해석 | 앵커 사후기여 | 뷰 기여 | mean‖w*−w_mkt‖ |
-| --- | --- | --- | --- | --- |
-| 0.025 | 보수적 | 38.7% | 61.3% | 0.02536 |
-| 0.050 | 균형 | 30.9% | 69.1% | 0.02843 |
-| 0.100 | 공격적 | 24.0% | 76.0% | 0.03102 |
-
-- 앵커기여 **단조 감소**(38.7→30.9→24.0), 뷰기여·가중괴리 **단조 증가** → 보수↔공격 스펙트럼 단조.
-- **이전(λ→1.0)에서는 mean‖w*−w_mkt‖ 가 0.03698→0.03716→0.03727 로 거의 불변** = τ가 손잡이로
-  작동하지 않았음. 이후 0.02536→0.03102 로 의미 있게 이동 = **τ가 진짜 손잡이로 복원**.
-- (주의: BL 표준 의미론대로 `τ↑=공격적`. 작업지시 §3의 "0.025/0.05/0.1=공격/균형/보수" 위치 표기는
-  방향이 반대였으며, 단위정합 구현(Q∝√τ)에서도 실측이 `τ↑=뷰지배=공격`임을 본 표로 확정.)
-
-## 5. 아티팩트 검증 — +19.3%p lift 가 "앵커 무시"의 산물인가 (walk-forward 전/후)
-
-| 지표 | before (λ→1.0, 앵커 2.8%) | after (λ=0.25, 앵커 30.9%) |
+| 비교 | Spearman(tw) | 의미 |
 | --- | --- | --- |
-| mean_ret_bl | +7.02% | +2.49% |
-| mean_ret_market(naive) | −12.23% | −12.23% |
-| **lift (BL−naive)** | **+19.26%p** | **+14.72%p** |
-| **mean_IC** | **+0.333** | **+0.330** |
-| win_rate (BL>naive) | 100% (12/12) | 100% (12/12) |
-| ir_bl | +1.615 | +0.564 |
-| prec_lift | +0.107 | +0.071 |
+| A(3축병합) vs B(news+pattern 2축병합) | 0.949 | **relationship-drop** 단독 효과(블록스택 무관) |
+| B(2축병합) vs C(블록스택 empirical) | 0.926 | **블록스택 구조** 효과 |
+| A(3축병합) vs C(블록스택 empirical) | 0.883 | 전체 |
 
-**판정(이상 없음, 진행).** 앵커를 30%로 **강화**했더니 lift는 −4.5%p **하락**했고(↑가 아님), **IC는
-0.333→0.330로 유지**됨. 즉:
-- 기존 +19.3%p 중 ~4.5%p는 "앵커 무시(과도 틸트)"분 — 정규화가 이를 정직하게 깎아냄.
-- 남은 +14.7%p는 IC가 뒷받침하는 **실신호**이고 win-rate 100% 유지 → 신호 붕괴 아님.
-- 정지 조건("lift **상승**이 앵커 약화에서 온 경우")의 반대 방향이며, IC 보존으로 우려한 시나리오 아님.
-- IR 하락은 앵커가 공격성을 규제해 평균초과수익이 준 결과(분산 ~동일)이며 강건성(win 100%)은 보존.
-- C1(뷰가 uplift 인가 단순 성장예측인가)은 별개 이슈로 C3 범위 밖 — IC 보존은 "뷰의 순위예측력 유지"만 의미.
+→ ρ=0.6에서 A-vs-C(0.943) ≈ A-vs-B(0.949): **블록스택은 redundancy 가 옳게 명시되면 2축병합(count-once)을
+정확히 재현**(융합중립). 잔여 차이는 *블록스택이 아니라 의도된 relationship-drop* 이 지배.
 
-## 6. demo 권고 전/후 비교 (방향 보존, 크기 규제)
+> ⚠️ **재현성 단서(정직)**: §4 표의 비교기준 행 — 'E3a 전 단일병합'(0.440/Spearman 1.000)·동등성 분해
+> 'A 3축병합'·'B 2축병합' — 은 **E3a 적용 전 일회성 산출 스냅샷**이다. 손가중 단일병합 코드(`build_views`/
+> `AXIS_WEIGHTS`)는 현재 트리에서 제거됐고(검증 스크립트는 미추적 `_scratch/`, 모델 학습 비결정성으로
+> 소수점 흔들림: Spearman 0.86~0.93·ρ 0.15~0.19) 회귀 테스트 가드가 없다. 따라서 위 정량치는 *방향성 근거*로
+> 읽되, 코드로 항상 재현되는 가드는 backtest 지표(§5, win 100%·max wᵢ 0.10 캡)와 `test_*`(블록스택 shape·
+> 결합등가·등-ω 불변·플러그인 기여)다. 분해를 회귀 고정하려면 레거시 병합 헬퍼를 테스트 픽스처로 보존해야
+> 한다(후속 가능, E3b).
 
-| 비교 | 값 |
-| --- | --- |
-| top-5 target_weight 중복 | 5/5 |
-| top-10 target_weight 중복 | 7/10 |
-| spearman(marketing_score) | +0.926 |
-| spearman(target_weight) | +0.785 |
-| mean‖Δ target_weight‖ | 0.0088 (max 0.047) |
-| action 분포 before→after | Aggressive Buy 7→6 · Buy 10→14 · Watch/Defend 19→16 |
+## 5. 결합 보수성 재측정 (walk-forward backtest, 12 윈도우)
 
-상위 권고는 안정적으로 보존(top-5 동일, 점수 랭크상관 0.93)되고, 앵커가 극단 틸트를 중앙으로 규제
-(Aggressive/Watch 감소, Buy 증가)함. Option B는 "동작 보존"이 아니라 "앵커를 살리는 의도된 변경"이므로
-변화량을 보존이 아닌 **정량 변화**로 보고함.
-
-## 7. 검증 결과
-
-- `pytest -q`: **117 passed** (λ 관련 테스트는 §1대로 대체).
-- `ruff check src tests`: All checks passed. `mypy` (inputs/optimize): Success.
-- demo: `python -m bl.synth.generate && python -m bl.pipeline` 정상 동작(λ=0.25, 권고 산출).
-
-## 8. 동시편집/머지 노트
-
-본 작업은 메인 트리에서 **병렬 세션의 E2 작업(anomaly 축→Ω 신뢰도 변조)이 진행 중**이어서, 충돌
-방지를 위해 격리 worktree(`c3-lambda-normalization`, HEAD `1e7d6a6` 기준)에서 수행함. C3와 E2는
-`inputs.py` 헤더/metadata·`docs/design/03`·`README` 일부 영역이 겹치므로 **머지 시 충돌 해결 필요**.
-
-## 9. 머지 완료 — E2+C3 결합 실측 (main)
-
-E2(`e850a5f`) FF 후 C3(`c9e6d73`)를 3-way 머지(merge commit). 충돌은 `inputs.py`(헤더·상수·metadata)·
-`tests/test_inputs.py`(헤더) 뿐이었고 **전부 keep-both로 해결**(E2의 3축·γ_anom·Ω변조 + C3의 Π정규화·
-LAMBDA_FIXED·lambda_effective 공존). 결합 검증: **pytest 122 pass · ruff/mypy clean · demo 정상**(λ=0.25·γ_anom=2.0).
-
-**중요 — 결합 시 보수성 가중(운영 판단 필요):** E2·C3 둘 다 뷰를 prior로 후퇴시키는 규제라, 결합 BL이
-합성 positive-control에서 보수적으로 수렴한다.
-
-| 지표 | C3 단독(λ=0.25) | E2 단독(README, λ→1.0) | **결합 E2+C3(main)** |
+| 지표 | C3·E2 (E3a 전) | **+E3a (기본 empirical)** | 비고 |
 | --- | --- | --- | --- |
-| mean_ret_bl | +2.49% | +7.2%(미정밀) | **−0.1%(≈0)** |
-| lift vs naive | +14.72%p | ~+19.4%p | **+12.09%p** |
-| mean_IC | +0.330 | +0.32 | **+0.322** |
-| ir_bl | +0.564 | ~2.0 | **−0.035** |
-| win_rate | 100% | 100% | **100%** |
+| lift (BL−naive) | +12.08%p | **+16.1%p** | ↑ — 그러나 *번영 추종*(굿하트), 아래 |
+| mean_IC | +0.312 | +0.391 | |
+| ir_bl | −0.035 | +1.17 | |
+| win_rate | 100% | 100% | 하방 회피 강건 보존 |
+| mean_ret_bl | −0.15% | +3.9% | |
+| 앵커 사후기여@τ=0.05 | 0.440 | 0.374 | 20–50% 게이트 내(급락 아님) |
 
-γ_anom 스윕(결합): γ=0 lift +0.149(최대, E2의 "anomaly 방향알파 없음" 결합서도 확인)·γ=1 +0.134·**γ=2 +0.120(기본)**·γ=4 +0.101. IC 0.327→0.298 단조. → 가치가 "절대 초과수익"에서 **"하방 회피(naive −12.2% 손실 회피)+신호 보존(IC +0.32)"**으로 이동. 결합 보수성(γ_anom=2·λ_fix=0.25)이 과한지는 **운영 정책 판단**이며 동일 백테스트로 재캘리브레이션 가능.
+**lift 상승(+12→+16)의 귀속(중요)**: view_corr 전 구간에서 lift 가 +0.15~0.17 로 유지(0.0→+0.168,
+0.6→+0.151)되어 **블록스택 off-diag 효과는 minor**이고, 상승은 **의도된 relationship-drop**(데모에서
+relationship 은 잔액성장과 무관한 노이즈 축)이 지배한다. **이 raw lift 상승은 가치 개선이 아니라
+*번영 추종*이다(굿하트)** — 채점이 raw 실현 잔액수익(번영)이라 공격성↑=「가만둬도 클 법인」 추종(C1 미해결).
+따라서 기본은 보수값 유지, 운영값은 처치 레이어(uplift)·실데이터 재캘리로 확정.
 
-## 10. 정책 손잡이(보수↔공격) 스펙트럼 — 기본 보수값 유지, 운영값은 uplift 후 확정
+## 6. off-diagonal 처리 — 무엇을·왜
 
-영업 공격성은 **세 손잡이**로 노출한다(코드: `run_from_frames`/`run_backtest`의 `tau`·`lambda_fixed`·
-`gamma_anom`; 스윕: `eval.calibrate.sweep_tau`/`sweep_lambda_fixed`/`calibrate_gamma_anom`). **공격 방향
-= τ↑·λ_fix↓·γ_anom↓.** 각 손잡이를 단독으로 움직인 결합 코드 실측(나머지는 기본 고정, win-rate 전 구간 100%):
+- **형태**: $\Omega_{(a,i),(b,i)}=R^{\text{view}}_{ab}\sqrt{\Omega_{(a,i)}\Omega_{(b,i)}}$, $R^{\text{view}}$=뷰상관행렬.
+- **기본값 = 표준화 신호의 경험 상관(프록시)** — task 가 지정한 "표준화 신호 상관 프록시". 데이터 적응적이며
+  **매직상수 없음**(AXIS_WEIGHTS 손가중 제거 정신 계승). 직교 미래뷰는 $\rho\approx0$ 로 자동 독립계상.
+- **PSD/조건수 보호**: $R^{\text{view}}$ 고유값 $[\varepsilon,1]$ 클립 → 단위대각 재정규화 → 비대각 $|\rho|\le0.98$ 클립.
+  특이 $\Omega$(완전중복) 회피. demo Ω eigmin>0, 조건수 283(기본) — PSD/조건수 게이트 미파손.
+- **왜 ρ=0.6을 기본으로 안 박았나**: ρ=0.6 이 데모 동등성 최적(랭킹 0.943·앵커 0.402)이나, 이는 **데모특정
+  최적값**이라 박으면 합성 positive-control **과적합(굿하트)** — 본 프로젝트가 반복 경고한 안티패턴이다.
+  proper redundancy(실현잔차 상관)는 **E1b(실데이터)** 보류, 손잡이(`calibrate_view_corr`)로 노출.
 
-| 손잡이 | 보수 ← → 공격 (값: lift / IC / IR) | 기본값 |
+## 7. 정지조건 점검 (전부 미발동 → 진행)
+
+| 정지조건 | 판정 | 근거 |
 | --- | --- | --- |
-| τ | 0.025: 0.103/0.298/−0.46 · **0.05: 0.120/0.316/−0.05** · 0.10: 0.141/0.323/+0.45 | 0.05 |
-| λ_fix | 1.0: 0.054/0.248/−1.87 · 0.5: 0.084/0.288/−0.97 · **0.25: 0.121/0.317/−0.02** · 0.1: 0.165/0.321/+1.03 | 0.25 |
-| γ_anom | 4.0: 0.100/0.290/−0.53 · **2.0: 0.121/0.309/−0.02** · 1.0: 0.134/0.322/+0.28 · 0.0: 0.150/0.339/+0.70 | 2.0 |
+| 랭킹상관 낮음 | 통과 | Spearman 0.865(기본), C3 수용 0.785 상회 |
+| 앵커 기여율 급락 | 통과 | 0.440→0.374, 20–50% 게이트 내(급락=붕괴 아님); 하락분도 relationship-drop 지배 |
+| 과신 징후(극단 가중) | 통과 | max wᵢ=0.10 캡유지(전 view_corr 동일), 베이스라인과 동일 |
+| off-diag PSD/조건수 게이트 파손 | 통과(사전봉쇄) | $R^{\text{view}}$ 고유값·\|ρ\|≤0.98 클립이 특이 Ω 를 **구조적으로 사전 차단**(이 조건은 트립되지 않게 *설계*된 것 — 능동 감시 게이트 아님; demo Ω eigmin>0·조건수 283). 능동 κ(Ω)≤κ_max 감시는 후속(E3b) |
 
-**⚠️ 번영 추종 ≠ 영업효과(굿하트 경고).** 표에서 보듯 *모든 손잡이에서 공격적일수록 raw lift/IC/IR가 단조
-증가*한다. 그러나 현 백테스트는 **raw 실현 잔액수익(번영)** 으로 채점하므로 이 lift/IC/IR는 **영업 처치효과
-(uplift)가 아니라 '번영 추종' 지표**다(C1 미해결: 현 뷰는 *번영 예측*이라, 공격성↑ = "가만둬도 클 법인"에
-더 베팅). 따라서:
+## 8. 검증
 
-1. **이 표로 공격성을 튜닝하지 않는다** — 합성 positive-control 과적합(굿하트). 신뢰할 결론은 *질적* 결론뿐:
-   **IC +0.32 보존**(정보 살아있고 공격성만 보수화됨) · **win-rate 100%**(하방 회피 강건).
-2. **기본은 현 보수값 유지**(τ=0.05·λ_fix=0.25·γ_anom=2.0). 영업 도메인 가치는 *하방 회피(naive −12.2%
-   손실 회피, lift +12.1%p) + 순위 보존(IC)*이며, 영업조직은 비중보다 **우선순위 리스트**를 쓴다.
-3. **운영값은 한 점에 고정하지 않는다.** 처치 레이어(uplift 채점) 머지 후 **KB 실데이터에서 uplift 기반
-   재캘리브레이션**으로 확정한다.
+- `pytest`: **142 passed**(132→142). `ruff check src tests`: clean. `mypy`: clean. demo 정상(λ=0.25).
+- 신규/갱신 테스트: `test_P_is_block_stack_of_identity`, `test_combined_stats_reproduce_blockstack_posterior`(블록스택≡결합단일뷰 사후 정확 일치, view_corr∈{None,0.6,0.9}), `test_offdiag_at_equal_omega_is_average_direction_invariant`(등-ω 특수케이스: q_eff=평균·off-diag는 정밀도만), `test_offdiag_shifts_direction_at_unequal_omega`(★정직: ω 상이 운영경로에선 off-diag가 방향도 조절), `test_plugin_view_increases_k_and_contributes`(K=3 + 추가뷰 사후 기여), `test_omega_psd_and_offdiagonal_present`, `test_view_registry_is_news_pattern_only`, `test_q_variance_matches_tau_sigma_unit`(블록별 단위정합), `test_calibrate_view_corr_structure`.
+- **적대적 멀티에이전트 리뷰**(4차원×검증, 14발견→7확정/7기각) 반영: 동작동등 주장을 '무조건 불변'→'등-ω 특수케이스 + 기본경로 경험적'으로 정정(코드 docstring·REPORT·설계 §3/§5.2/§5.4·README), 플러그인 테스트 충실화, Q 블록별·결합등가 강화, §5.4 ω_scale·§11 c(분산정합) 문서-코드 정합, §7 PSD '사전봉쇄' 명확화, §4 비재현 스냅샷 각주.
 
-> **채점 기준 명시(중요):** 현 백테스트는 **raw 실현수익(번영)** 채점이므로 위 알파/lift는 *영업효과가 아닌
-> 번영 추종 지표*다. **uplift 채점(처치 레이어)으로 전환한 뒤 재해석**해야 하며, 그 전까지 공격성 상향은 보류한다.
+## 9. 결론
 
-(머지 정리: 임시 stash·`_scratch/`·`_c3/`·worktree는 정리함.)
+이 작업은 **미래 뷰(갈래B 이동성 등)의 플러그인 자리를 여는 비계**이며, 현재 융합동작은 **기본 경로에서
+실질 보존**된다: 작은 경험프록시 ρ 기본값에서 블록스택이 랭킹을 보존(demo Spearman 0.87)하고 off-diagonal
+이 번영뷰 독립확증 과신을 상쇄한다(엄밀 방향불변은 등-ω 특수케이스, 운영 동등성은 경험적 — §3). relationship
+은 $\Sigma$ 이동성 슬롯으로 예약(E1b), 뷰별 off-diag 캘리브레이션은 E3b 자리(`calibrate_view_corr`)로 노출했다.
+관측된 raw lift 상승은 의도된 relationship-drop의 부수효과이자 번영 추종(굿하트)일 뿐, 운영값 확정은
+uplift 채점·실데이터 재캘리 이후다.
+
+> 다음: **E1b**(실현잔차 상관으로 off-diag proper 추정 + relationship→Σ 이동성 구조) · **E3b**(`calibrate_view_corr`
+> 로 뷰별 Ω 캘리브레이션) · uplift 기반 운영값 확정.

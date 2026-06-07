@@ -4,8 +4,10 @@
 §11(파라미터 표). 핵심 전환: README 의 '가설값'(선언) → 실현 잔액수익으로 검증된 '추정값'.
 
 - sweep_tau: τ ∈ {0.025,0.05,0.1}(설계 그리드)를 백테스트로 평가 → lift/IC/IR 안정성·최적값 확인.
-- calibrate_axis_weights: 뷰 3축(news/pattern/relationship) 가중 a 그리드를 실현 IC 로 역산 —
-  비율보존 재정규화 기본값 ≈(0.412,0.412,0.176)이 최적인지 데이터로 검증(anomaly 는 Ω 요인으로 분리).
+- calibrate_view_corr: 뷰 off-diagonal Ω 상관 ρ_view 그리드를 실현지표로 역산 — 두 번영뷰(news·pattern)
+  중복을 얼마나 상쇄할지(독립확증 과신 제어)를 데이터로 정한다. E3a 블록스택의 뷰 결합 손잡이이며,
+  과거의 손가중 a 그리드(calibrate_axis_weights, 단일병합 전제)를 대체한다(E3b 자리; 손가중은 BL Ω가 융합).
+  ρ_view=None(경험 신호상관 프록시)이 기본이고, 그리드는 명시 스칼라(0=독립↔1 근접=완전중복) 후보다.
 - calibrate_omega_scale: Ω 전역 신뢰스케일을 실현 lift 로 역산. ADR-0004 §5 reliability 보정의
   1차 근사(전역 스케일)이며, 다음단계는 축별 Platt/isotonic reliability(예측 confidence↔실현 적중률).
 - calibrate_gamma_anom: anomaly 의 Ω 변조 강도 γ 를 실현 lift/IC 로 역산 — anomaly 가 방향 뷰가
@@ -25,18 +27,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from bl.engine.inputs import AXIS_WEIGHTS
 from bl.eval.backtest import run_backtest
 
-# 축가중 후보 그리드(합=1, 뷰 3축 news/pattern/relationship). 첫 항목 = 현재 운영값(eval 시 baseline).
-DEFAULT_AXIS_GRID: list[dict] = [
-    dict(AXIS_WEIGHTS),                                       # 현재 ≈ (0.412,0.412,0.176)
-    {"news": 0.30, "pattern": 0.50, "relationship": 0.20},   # pattern 강화
-    {"news": 0.50, "pattern": 0.30, "relationship": 0.20},   # news 강화
-    {"news": 0.35, "pattern": 0.35, "relationship": 0.30},   # relationship 강화
-    {"news": 0.34, "pattern": 0.33, "relationship": 0.33},   # 균등
-]
 DEFAULT_TAU_GRID: tuple[float, ...] = (0.025, 0.05, 0.1)
+# 뷰 off-diagonal Ω 상관 ρ_view 후보(E3a 블록스택). None=경험 신호상관 프록시(기본), 0=독립(K배 과신),
+# 1 근접=완전중복(count-once, 보수). 첫 항목 None = 현재 운영값(eval baseline).
+DEFAULT_VIEW_CORR_GRID: tuple[float | None, ...] = (None, 0.0, 0.3, 0.6, 0.9)
 DEFAULT_OMEGA_GRID: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0)
 # anomaly Ω 변조 게인 γ 그리드. γ=0 = anomaly 무시(Ω 변조 없음). 기본 운영값 GAMMA_ANOM=2.0.
 DEFAULT_GAMMA_GRID: tuple[float, ...] = (0.0, 1.0, 2.0, 4.0)
@@ -72,13 +68,19 @@ def sweep_tau(
     return df, _best(df, objective)
 
 
-def calibrate_axis_weights(
-    frames: dict, grid: list[dict] = DEFAULT_AXIS_GRID, *,
+def calibrate_view_corr(
+    frames: dict, grid: tuple[float | None, ...] = DEFAULT_VIEW_CORR_GRID, *,
     objective: str = "mean_ic", **bt_kwargs,
 ) -> tuple[pd.DataFrame, dict]:
-    """축가중 a 그리드를 실현 IC(기본)로 역산 → (지표표, 최적 가중 행)."""
-    rows = [{**aw, **_metrics(run_backtest(frames, axis_weights=aw, **bt_kwargs)["summary"])}
-            for aw in grid]
+    """뷰 off-diagonal Ω 상관 ρ_view 그리드를 실현 IC(기본)로 역산 → (지표표, 최적 행).
+
+    E3a 블록스택의 뷰 결합 손잡이(과거 손가중 calibrate_axis_weights 대체, E3b 자리). ρ_view 가
+    클수록 두 번영뷰를 중복으로 보아 한 뷰처럼 묶고(보수, 앵커↑), 작을수록 독립확증(공격, 앵커↓).
+    None=경험 신호상관 프록시. 결과의 view_corr 컬럼은 그리드 원소(None 은 문자열 'empirical')."""
+    rows = []
+    for rho in grid:
+        m = _metrics(run_backtest(frames, view_corr=rho, **bt_kwargs)["summary"])
+        rows.append({"view_corr": "empirical" if rho is None else rho, **m})
     df = pd.DataFrame(rows)
     return df, _best(df, objective)
 
@@ -138,11 +140,10 @@ if __name__ == "__main__":
     print(tdf.to_string(index=False))
     print(f"→ best τ = {tbest.get('tau')} (lift={tbest.get('lift_bl_vs_market'):+.4f})")
 
-    print("\n=== 축가중 a 역산 (목적=mean_ic) ===")
-    adf, abest = calibrate_axis_weights(fr)
-    print(adf.to_string(index=False))
-    print(f"→ best a = news {abest.get('news')}/pattern {abest.get('pattern')}/"
-          f"relationship {abest.get('relationship')} (IC={abest.get('mean_ic'):+.4f})")
+    print("\n=== 뷰 off-diag 상관 ρ_view 역산 (목적=mean_ic) ===")
+    vdf, vbest = calibrate_view_corr(fr)
+    print(vdf.to_string(index=False))
+    print(f"→ best ρ_view = {vbest.get('view_corr')} (IC={vbest.get('mean_ic'):+.4f})")
 
     print("\n=== Ω-scale 캘리브레이션 (목적=lift) ===")
     odf, obest = calibrate_omega_scale(fr)

@@ -9,7 +9,7 @@
 
 ## 맥락(Context)
 
-BL의 투자자 전망(View, $Q$)은 **뷰 3축 AI 신호 앙상블**로 구성된다 — news(Gemini 감성), pattern(XGBoost 성장/이탈), relationship(거래관계 강도). (축 정의·컬럼 매핑은 [BL §5.1](../03-bl-model-design.md) 참조.) IsolationForest 이상도(anomaly)는 방향 뷰가 아니라 $\Omega$ 신뢰도 변조 요인으로 들어간다([BL §5.4](../03-bl-model-design.md), 게인 $\gamma_{\text{anom}}=2.0$). 즉 모델 출력이 곧 BL 입력이므로, 모델이 과대평가되면 BL 사후수익·최적가중이 통째로 왜곡된다. 따라서 모델 검증의 정직성이 시스템 전체 타당성의 전제다. 본 ADR이 다루는 **신뢰도 캘리브레이션**은 XGBoost confidence·Gemini 감성 신뢰도(`gemini_confidence`)·이상도(anomaly) 등 $\Omega$로 들어가는 신뢰도 신호 전부를 대상으로 한다.
+BL의 투자자 전망(View, $Q$)은 **뷰 레지스트리 블록스택**(현 news·pattern 2뷰)으로 구성된다 — news(Gemini 감성), pattern(XGBoost 성장/이탈). relationship(거래관계 강도)은 방향 뷰가 아니라 현재상태=이동성이라 $\Sigma$ 이동성 슬롯으로 예약한다(E3a, [BL §5.1](../03-bl-model-design.md) 참조). IsolationForest 이상도(anomaly)는 방향 뷰가 아니라 $\Omega$ 신뢰도 변조 요인으로 들어간다([BL §5.4](../03-bl-model-design.md), 게인 $\gamma_{\text{anom}}=2.0$). 즉 모델 출력이 곧 BL 입력이므로, 모델이 과대평가되면 BL 사후수익·최적가중이 통째로 왜곡된다. 따라서 모델 검증의 정직성이 시스템 전체 타당성의 전제다. 본 ADR이 다루는 **신뢰도 캘리브레이션**은 XGBoost confidence·Gemini 감성 신뢰도(`gemini_confidence`)·이상도(anomaly) 등 $\Omega$로 들어가는 신뢰도 신호 전부를 대상으로 한다.
 
 과거 토이 프로젝트는 시계열·라벨 처리에서 다수의 누수(leakage)를 안고 있었다.
 
