@@ -1,19 +1,46 @@
-"""고정 스케일러 — train 구간 fit 파라미터 저장/재사용(추론배치 정규화 누수 금지, ADR-0004)."""
+"""고정 스케일러 — train 구간 fit 파라미터 저장/재사용(추론배치 정규화 누수 금지, ADR-0004).
+
+추론 시 현재 배치 통계로 재정규화하면 누수·실행간 비교불가가 발생한다(토이 결함). train에서
+적합한 (mean,std)를 JSON으로 저장하고, 추론에는 그 파라미터만 적용한다.
+"""
+
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 if TYPE_CHECKING:
-    import duckdb
     import pandas as pd
-    from bl.common.config import Settings
 
 
-def fit_scaler(df: "pd.DataFrame", cols: list[str], path: str) -> dict:
-    """train 통계로 스케일러 적합·artifacts 저장."""
-    raise NotImplementedError("P3에서 구현 — 설계 문서 참조")
+def fit_scaler(df: "pd.DataFrame", cols: list[str], path: str | Path | None = None) -> dict:
+    """train df의 cols에 대해 z-score 파라미터 {col:[mean,std]} 적합. path 주면 JSON 저장."""
+    params: dict[str, list[float]] = {}
+    for c in cols:
+        x = df[c].to_numpy(dtype="float64")
+        mu = float(np.nanmean(x)) if len(x) else 0.0
+        sd = float(np.nanstd(x)) if len(x) else 1.0
+        params[c] = [mu, sd if sd > 1e-12 else 1.0]
+    if path is not None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(params, ensure_ascii=False, indent=2), encoding="utf-8")
+    return params
 
 
-def apply_scaler(df: "pd.DataFrame", path: str) -> "pd.DataFrame":
-    """저장된 train 기준 파라미터로만 변환(현재 배치 통계 사용 금지)."""
-    raise NotImplementedError("P3에서 구현 — 설계 문서 참조")
+def load_scaler(path: str | Path) -> dict:
+    """저장된 스케일러 파라미터를 로딩한다."""
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def apply_scaler(df: "pd.DataFrame", scaler: dict | str | Path) -> "pd.DataFrame":
+    """저장된 train 기준 파라미터로만 표준화한다(현재 배치 통계 사용 금지)."""
+    params = scaler if isinstance(scaler, dict) else load_scaler(scaler)
+    out = df.copy()
+    for c, (mu, sd) in params.items():
+        if c in out.columns:
+            out[c] = (out[c].to_numpy(dtype="float64") - mu) / (sd if sd > 1e-12 else 1.0)
+    return out

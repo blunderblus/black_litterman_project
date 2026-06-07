@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>BL INTELLIGENCE TERMINAL</title>
+<style>
+  :root{--bg:#000;--amber:#FFB000;--green:#39FF14;--cyan:#00FFFF;--red:#FF073A;--fg:#e0e0e0;--panel:#0a0a0a;--line:#222}
+  *{box-sizing:border-box;border-radius:0!important}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:'Roboto Mono',Consolas,monospace;font-size:13px}
+  header{border-bottom:2px solid var(--amber);padding:10px 16px;display:flex;justify-content:space-between;align-items:center}
+  header h1{color:var(--amber);font-size:16px;letter-spacing:2px;margin:0}
+  header .meta{color:#888;font-size:11px;text-align:right}
+  .kpis{display:flex;gap:10px;padding:12px 16px;flex-wrap:wrap}
+  .kpi{background:var(--panel);border:1px solid var(--line);padding:10px 16px;min-width:150px}
+  .kpi .label{color:#888;font-size:10px;letter-spacing:1px}
+  .kpi .val{color:var(--cyan);font-size:20px;margin-top:4px}
+  .wrap{display:flex;gap:12px;padding:0 16px 16px}
+  .list{flex:1.3;min-width:0}
+  .detail{flex:1;background:var(--panel);border:1px solid var(--line);padding:14px;min-height:420px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--amber);font-size:10px;letter-spacing:1px;cursor:pointer;user-select:none}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:#141414}
+  tbody tr.sel{background:#1c1c0a}
+  td.num{text-align:right}
+  .sig{padding:2px 6px;font-size:10px;font-weight:bold}
+  .buy{color:var(--green)} .agg{color:var(--green);text-shadow:0 0 6px var(--green)}
+  .hold{color:#aaa} .def{color:var(--red)} .new{color:var(--cyan)}
+  .bar{height:8px;background:#222;position:relative;margin-top:3px}
+  .bar > i{position:absolute;left:0;top:0;height:100%;background:var(--amber)}
+  .d-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line)}
+  .d-row .k{color:#888} .d-row .v{color:var(--fg)}
+  .d-sec{color:var(--amber);font-size:11px;letter-spacing:1px;margin:14px 0 6px}
+  .note{background:#0f0f08;border-left:3px solid var(--amber);padding:10px;margin-top:8px;color:#ccc;font-size:12px;line-height:1.5}
+  footer{color:#666;font-size:10px;padding:10px 16px;border-top:1px solid var(--line)}
+  .prompt{color:var(--green)}
+</style>
+</head>
+<body>
+<header>
+  <h1>&gt;&gt; BL_INTELLIGENCE_TERMINAL</h1>
+  <div class="meta" id="meta"></div>
+</header>
+<div class="kpis" id="kpis"></div>
+<div class="wrap">
+  <div class="list">
+    <table>
+      <thead><tr id="hrow"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div class="detail" id="detail"><span class="prompt">&gt;</span> SELECT_TARGET …</div>
+</div>
+<footer id="foot"></footer>
+<script src="data.js"></script>
+<script>
+(function(){
+  var D = window.BL_DATA || {summary:{},rows:[],meta:{}};
+  var rows = D.rows || [];
+  var fmtEok = function(v){ return v==null? '-' : (v/1e8).toFixed(1)+'억'; };
+  var fmtNum = function(v,d){ return v==null? '-' : Number(v).toFixed(d==null?4:d); };
+  var pct = function(v){ return v==null? '-' : (v*100).toFixed(2)+'%'; };
+
+  // meta
+  var m = D.meta||{};
+  document.getElementById('meta').innerHTML =
+    'BASE_YM '+(m.base_ym||'-')+' | N='+(m.n_assets||rows.length)+' | λ='+(m.lambda||'-')+
+    ' | τ='+(m.tau||'-')+' | SRC='+(m.source||'-');
+
+  // KPIs
+  var s = D.summary||{};
+  var kpis=[['ACTIVE_LEADS', s.active_leads], ['AVG_SCORE', s.avg_score],
+            ['TOTAL_AUM', fmtEok(s.total_aum)], ['FUNDING_GAP', fmtEok(s.total_funding_gap)],
+            ['N_ASSETS', s.n]];
+  document.getElementById('kpis').innerHTML = kpis.map(function(k){
+    return '<div class="kpi"><div class="label">'+k[0]+'</div><div class="val">'+(k[1]==null?'-':k[1])+'</div></div>';
+  }).join('');
+
+  // table header
+  var cols=[['RANK','rank'],['CORP','corp_name'],['TIER','tier'],['SCORE','marketing_score'],
+            ['ACTION','action_guide'],['E[R]','bl_return'],['ΔW','weight_diff'],['GAP','funding_gap']];
+  document.getElementById('hrow').innerHTML = cols.map(function(c){return '<th data-k="'+c[1]+'">'+c[0]+'</th>';}).join('');
+
+  function sigClass(a){ if(!a) return 'hold';
+    if(a.indexOf('Aggressive')>=0) return 'agg'; if(a.indexOf('Buy')>=0) return 'buy';
+    if(a.indexOf('Defend')>=0) return 'def'; if(a.indexOf('New')>=0) return 'new'; return 'hold'; }
+
+  function render(list){
+    var tb=document.getElementById('tbody'); tb.innerHTML='';
+    list.forEach(function(r,i){
+      var tr=document.createElement('tr');
+      tr.innerHTML='<td class="num">'+(i+1)+'</td>'+
+        '<td>'+(r.corp_name||r.corp_code)+'</td>'+
+        '<td>'+(r.tier||'-')+'</td>'+
+        '<td class="num">'+fmtNum(r.marketing_score,1)+'</td>'+
+        '<td><span class="sig '+sigClass(r.action_guide)+'">'+(r.action_guide||'-')+'</span></td>'+
+        '<td class="num">'+fmtNum(r.bl_return,4)+'</td>'+
+        '<td class="num">'+fmtNum(r.weight_diff,5)+'</td>'+
+        '<td class="num">'+fmtEok(r.funding_gap)+'</td>';
+      tr.onclick=function(){ document.querySelectorAll('tbody tr').forEach(function(x){x.classList.remove('sel');});
+        tr.classList.add('sel'); detail(r); };
+      tb.appendChild(tr);
+    });
+  }
+
+  function detail(r){
+    function row(k,v){return '<div class="d-row"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>';}
+    var note='';
+    var a=r.action_guide||'';
+    if(a.indexOf('Aggressive')>=0) note='🔥 최우선 영업 대상. 금리우대·자금운용 컨설팅으로 적극 유치.';
+    else if(a.indexOf('Buy')>=0) note='📈 유치 확대 여력. 추가 상품 제안으로 지갑점유율 상향.';
+    else if(a.indexOf('Defend')>=0) note='🛡️ 이탈 징후. 관계강화·방어 영업으로 잔액 유지.';
+    else if(a.indexOf('New')>=0) note='🌱 신규유치 후보(잔액 미미). 신규 계좌·거래 유도.';
+    else note='➡️ 현 상태 유지. 정기 모니터링.';
+    document.getElementById('detail').innerHTML =
+      '<div class="d-sec">▣ CORP_PROFILE</div>'+
+      row('NAME', r.corp_name||r.corp_code)+ row('TIER / SECTOR', (r.tier||'-')+' / '+(r.sector_code||'-'))+
+      row('REGION', r.region||'-')+ row('CURRENT_BAL', fmtEok(r.current_bal))+
+      '<div class="d-sec">▣ MODEL_OPINION (AI 4축)</div>'+
+      row('GROWTH P', pct(r.prob_growth_raw))+ row('CHURN P', pct(r.prob_churn_raw))+
+      row('ANOMALY', fmtNum(r.anomaly_score_raw,3))+ row('NEWS_SENTIMENT', fmtNum(r.news_sentiment,3))+
+      '<div class="d-sec">▣ BLACK-LITTERMAN</div>'+
+      row('Π (prior)', fmtNum(r.pi,6))+ row('Q (view)', fmtNum(r.q,6))+ row('Ω (uncert.)', fmtNum(r.omega,6))+
+      row('E[R] (post)', fmtNum(r.bl_return,6))+
+      row('W: cur→tgt', fmtNum(r.current_weight,5)+' → '+fmtNum(r.target_weight,5))+
+      row('MARKETING_SCORE', fmtNum(r.marketing_score,1))+ row('FUNDING_GAP', fmtEok(r.funding_gap))+
+      '<div class="d-sec">▣ SALES_NOTE</div><div class="note">'+note+'</div>';
+  }
+
+  // sort
+  var asc={};
+  document.getElementById('hrow').addEventListener('click',function(e){
+    var k=e.target.getAttribute('data-k'); if(!k||k==='rank') return;
+    asc[k]=!asc[k];
+    rows.sort(function(x,y){var a=x[k],b=y[k];
+      if(typeof a==='string'){return asc[k]?(''+a).localeCompare(b):(''+b).localeCompare(a);}
+      a=a==null?-1e18:a; b=b==null?-1e18:b; return asc[k]?a-b:b-a;});
+    render(rows);
+  });
+
+  render(rows);
+  if(rows.length) { document.querySelector('tbody tr') && document.querySelector('tbody tr').click(); }
+  document.getElementById('foot').innerHTML =
+    '⚠ 합성 데모 데이터 · 모델 성능치는 미검증 가설(walk-forward conf: '+
+    JSON.stringify((D.meta||{}).model_confidence||{})+'). 실데이터는 API 키 설정 후 동일 파이프라인으로 생성.';
+})();
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@ from bl.common.config import get_settings
 from bl.common.logging import configure_logging, get_logger
 
 STAGES = [
+    "demo",            # 합성 데이터로 전 파이프라인 실행 → site/ 대시보드(키 불필요)
     "universe",
     "ingest-financial",
     "ingest-macro",
@@ -45,8 +46,24 @@ def main(argv: list[str] | None = None) -> int:
             **active_backend_info(settings.compute_backend),
         },
     )
-    # TODO(P1+): args.stage -> 각 레이어 함수 디스패치
-    raise SystemExit(f"stage '{args.stage}'는 아직 미구현(P0 스캐폴드). 로드맵 P1+에서 연결.")
+    if args.stage == "demo":
+        from bl.pipeline import run_demo
+
+        r = run_demo(out_dir="site", base_ym=args.base_ym or 202510)
+        m = r["mart"]
+        log.info(
+            "demo 완료",
+            extra={
+                "stage": "cli.demo",
+                "assets": int(len(m)),
+                "active_leads": int((m["marketing_score"] >= 80).sum()),
+                "html": r.get("html_path"),
+            },
+        )
+        return 0
+
+    # TODO(P1+): 나머지 스테이지는 ingest/features/models 연동 후 디스패치
+    raise SystemExit(f"stage '{args.stage}'는 아직 미연결. 데모는 `bl-run demo` 사용.")
 
 
 if __name__ == "__main__":
