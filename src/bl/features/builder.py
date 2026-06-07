@@ -1,31 +1,30 @@
-"""피처/라벨 — 시점 분리 시계열·재무·매크로 결합 → train_set/inference_set.
+"""피처/라벨 — **DuckDB SQL**(window 함수) 기반 시점분리 피처 생성 → train_set/inference_set.
 
-설계: docs/design/02-data-pipeline.md(features), ADR-0004(누수 차단). 과거 노트북 07 대응.
-핵심 교정: **미래 잔액(bal_future_3m)은 라벨에만 쓰고 피처에서 제외**(look-ahead 차단).
-inference_set 은 라벨/미래 컬럼 없이 base_ym 시점 피처만 포함.
+설계: docs/design/02-data-pipeline.md(features), ADR-0002(DuckDB+Parquet), ADR-0004(누수 차단).
+과거 노트북 07 대응. 핫패스(잔액 패널 수백만 행의 LAG/rolling/LEAD·ASOF 조인)는 DuckDB가
+pandas 대비 압도적이므로 **window 함수 SQL**로 처리한다. sklearn/XGBoost 핸드오프 경계에서만
+DataFrame으로 materialize한다.
+
+핵심 교정 유지: 미래(bal_future_3m)는 라벨에만(피처 제외, look-ahead 차단). 재무는 공시지연(lag)
+반영 point-in-time(ASOF base_ym >= 공시가용월). 추론셋엔 라벨/미래 없음.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
-
-from bl.common.dates import ym_add
 
 if TYPE_CHECKING:
     import duckdb
 
     from bl.common.config import Settings
 
-# 라벨 임계(설계 07): 3개월 후 잔액이 절반 미만→이탈, 1.2배 초과→성장.
 CHURN_DROP = 0.5
 GROWTH_RISE = 1.2
 LABEL_HORIZON = 3
-FIN_DISCLOSURE_LAG = 3   # 사업보고서 공시지연(개월): fin_ym 이후 이 개월부터 사용 가능(look-ahead 방지)
+FIN_DISCLOSURE_LAG = 3   # 사업보고서 공시지연(개월): fin_ym + lag 이후부터 사용 가능
 
-# 피처 컬럼(이 목록에 미래/라벨 컬럼은 절대 포함하지 않는다 — 누수 차단의 단일 소스).
 FEATURE_COLS = [
     "bal", "bal_lag1", "bal_lag3", "bal_ma3", "bal_ma6", "bal_std6", "bal_mom", "volatility_6m",
     "trx_in", "trx_out", "trx_activity", "payroll_yn", "main_bank_yn",
@@ -33,27 +32,86 @@ FEATURE_COLS = [
     "base_rate", "ktb3y", "bsi_mfg",
     "has_financial", "is_listed",
 ]
-# 절대 피처가 되어선 안 되는 컬럼(정적 가드).
 FORBIDDEN_FEATURE_COLS = {"bal_future_3m", "label_churn", "label_growth"}
+_META = ["corp_code", "base_ym", "TIER", "sector_code", "group"]
+
+# 공시 가용월(YYYYMM) = base_ym + FIN_DISCLOSURE_LAG 개월 (정수 연월 산술)
+_AVAIL_YM = (
+    "(((CAST(base_ym/100 AS INT)*12 + (base_ym%100) - 1 + {lag})/12)*100 "
+    "+ ((CAST(base_ym/100 AS INT)*12 + (base_ym%100) - 1 + {lag})%12) + 1)"
+).format(lag=FIN_DISCLOSURE_LAG)
 
 
-def _balance_features(post: pd.DataFrame) -> pd.DataFrame:
-    """월별 잔액 패널 → 시계열 피처 + (라벨용) 미래 잔액. corp_code 별 시점 정렬."""
-    df = post.sort_values(["corp_code", "base_ym"]).copy()
-    g = df.groupby("corp_code")["bal"]
-    df["bal_lag1"] = g.shift(1)
-    df["bal_lag3"] = g.shift(3)
-    df["bal_ma3"] = g.transform(lambda s: s.rolling(3, min_periods=1).mean())
-    df["bal_ma6"] = g.transform(lambda s: s.rolling(6, min_periods=1).mean())
-    df["bal_std6"] = g.transform(lambda s: s.rolling(6, min_periods=2).std())
-    df["bal_mom"] = df["bal"] / df["bal_lag3"] - 1.0
-    df["volatility_6m"] = df["bal_std6"] / df["bal_ma6"]              # 변동계수(이탈위험 대용)
-    # 라벨 전용 미래값(LEAD) — 피처로 새지 않게 별도 보관
-    df["bal_future_3m"] = g.shift(-LABEL_HORIZON)
-    df["trx_in"] = df["trx_cnt_in_6m"].astype("float64")
-    df["trx_out"] = df["trx_cnt_out_6m"].astype("float64")
-    df["trx_activity"] = df["trx_in"] + df["trx_out"]
-    return df
+def _run_features(con: "duckdb.DuckDBPyConnection") -> pd.DataFrame:
+    """con 의 테이블(post_data/financial_wide/macro/target_master)로 피처 행렬 SQL 실행."""
+    con.execute("""
+        CREATE OR REPLACE TEMP VIEW _macro_wide AS
+        SELECT base_ym,
+          max(CASE WHEN metric_code='BASE_RATE' THEN value END) AS base_rate,
+          max(CASE WHEN metric_code='KTB3Y'    THEN value END) AS ktb3y,
+          max(CASE WHEN metric_code='BSI_MFG'  THEN value END) AS bsi_mfg
+        FROM macro GROUP BY base_ym
+    """)
+    con.execute(f"""
+        CREATE OR REPLACE TEMP VIEW _fin AS
+        WITH d AS (
+          SELECT *, row_number() OVER (PARTITION BY corp_code ORDER BY base_ym DESC) AS rn
+          FROM financial_wide
+        )
+        SELECT corp_code, revenue, net_income, total_assets, total_equity, cash_amount,
+          total_liabilities / NULLIF(total_assets,0) AS debt_ratio,
+          {_AVAIL_YM} AS avail_ym
+        FROM d WHERE rn = 1
+    """)
+    sql = f"""
+    WITH bf AS (
+      SELECT corp_code, base_ym, bal, payroll_yn, main_bank_yn,
+        LAG(bal,1) OVER w AS bal_lag1,
+        LAG(bal,3) OVER w AS bal_lag3,
+        AVG(bal) OVER (PARTITION BY corp_code ORDER BY base_ym ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS bal_ma3,
+        AVG(bal) OVER (PARTITION BY corp_code ORDER BY base_ym ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) AS bal_ma6,
+        stddev_samp(bal) OVER (PARTITION BY corp_code ORDER BY base_ym ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) AS bal_std6,
+        LEAD(bal,{LABEL_HORIZON}) OVER w AS bal_future_3m,
+        CAST(trx_cnt_in_6m AS DOUBLE) AS trx_in,
+        CAST(trx_cnt_out_6m AS DOUBLE) AS trx_out
+      FROM post_data
+      WINDOW w AS (PARTITION BY corp_code ORDER BY base_ym)
+    ),
+    j AS (
+      SELECT bf.*,
+        bf.bal / NULLIF(bf.bal_lag3,0) - 1 AS bal_mom,
+        bf.bal_std6 / NULLIF(bf.bal_ma6,0) AS volatility_6m,
+        bf.trx_in + bf.trx_out AS trx_activity,
+        f.revenue, f.net_income, f.total_assets, f.total_equity, f.cash_amount, f.debt_ratio,
+        mw.base_rate, mw.ktb3y, mw.bsi_mfg,
+        t.TIER, t.sector_code,
+        CASE WHEN t.stock_code IS NOT NULL THEN 1 ELSE 0 END AS is_listed
+      FROM bf
+      ASOF LEFT JOIN _fin f ON bf.corp_code = f.corp_code AND bf.base_ym >= f.avail_ym
+      LEFT JOIN _macro_wide mw ON bf.base_ym = mw.base_ym
+      LEFT JOIN target_master t ON bf.corp_code = t.corp_code
+    )
+    SELECT *,
+      CASE WHEN revenue IS NOT NULL THEN 1 ELSE 0 END AS has_financial,
+      CASE WHEN bal_future_3m IS NULL THEN NULL
+           WHEN bal_future_3m < bal*{CHURN_DROP} THEN 1 ELSE 0 END AS label_churn,
+      CASE WHEN bal_future_3m IS NULL THEN NULL
+           WHEN bal_future_3m > bal*{GROWTH_RISE} THEN 1 ELSE 0 END AS label_growth,
+      CASE WHEN revenue IS NOT NULL THEN 'A' ELSE 'B' END AS "group"
+    FROM j
+    """
+    return con.execute(sql).fetchdf()
+
+
+def _split(df: pd.DataFrame, base_ym: int) -> dict[str, pd.DataFrame]:
+    """피처 행렬 → {train(라벨 유효), inference(base_ym, 라벨 없음)}. 누수 가드 포함."""
+    leaked = FORBIDDEN_FEATURE_COLS & set(FEATURE_COLS)
+    if leaked:
+        raise AssertionError(f"누수: 미래/라벨 컬럼이 FEATURE_COLS에 포함됨 {leaked}")
+    feat = [c for c in FEATURE_COLS if c in df.columns]
+    train = df[df["bal_future_3m"].notna()][_META + feat + ["label_churn", "label_growth"]]
+    inference = df[df["base_ym"] == base_ym][_META + feat]
+    return {"train": train.reset_index(drop=True), "inference": inference.reset_index(drop=True)}
 
 
 def build_features_from_frames(
@@ -63,62 +121,21 @@ def build_features_from_frames(
     target_master: pd.DataFrame,
     base_ym: int,
 ) -> dict[str, pd.DataFrame]:
-    """프레임 입력으로 train_set/inference_set 을 구성한다(순수 함수, 오프라인 검증용).
+    """프레임 입력 → DuckDB(in-memory) 등록 후 SQL 피처 생성(순수 함수, 오프라인 검증용)."""
+    import duckdb
 
-    Returns: {'train': train_set(라벨 포함), 'inference': inference_set(base_ym, 라벨 없음)}.
-    """
-    df = _balance_features(post_data)
-
-    # 재무(ASOF 단순화: corp별 최신 1행 broadcast) + has_financial
-    fin_cols = ["revenue", "net_income", "total_assets", "total_equity", "cash_amount", "debt_ratio"]
-    fin = financial_wide.copy()
-    if not fin.empty:
-        fin = fin.sort_values("base_ym").groupby("corp_code", as_index=False).last()
-        fin["debt_ratio"] = fin["total_liabilities"] / fin["total_assets"].replace(0, np.nan)
-        fin["_fin_avail_ym"] = fin["base_ym"].map(lambda y: ym_add(int(y), FIN_DISCLOSURE_LAG))
-        df = df.merge(fin[["corp_code", "_fin_avail_ym", *fin_cols]], on="corp_code", how="left")
-        # point-in-time: 공시 가용 시점 이전(base_ym < 공시가용월)에는 재무를 비운다(look-ahead 차단)
-        not_avail = df["_fin_avail_ym"].notna() & (df["base_ym"] < df["_fin_avail_ym"])
-        df.loc[not_avail, fin_cols] = np.nan
-        df = df.drop(columns=["_fin_avail_ym"])
-    df["has_financial"] = df["revenue"].notna().astype(int) if "revenue" in df.columns else 0
-
-    # 매크로(base_ym 시점 정합)
-    mac = macro.pivot_table(index="base_ym", columns="metric_code", values="value", aggfunc="last")
-    mac = mac.rename(columns={"BASE_RATE": "base_rate", "KTB3Y": "ktb3y", "BSI_MFG": "bsi_mfg"})
-    df = df.merge(mac.reset_index(), on="base_ym", how="left")
-
-    # 메타(tier/sector/is_listed)
-    tm = target_master[["corp_code", "TIER", "sector_code", "stock_code"]].copy()
-    tm["is_listed"] = tm["stock_code"].notna().astype(int)
-    df = df.merge(tm[["corp_code", "TIER", "sector_code", "is_listed"]], on="corp_code", how="left")
-
-    # 라벨(미래 잔액 기준) — 미래가 있는 행만 라벨 유효
-    fut = df["bal_future_3m"]
-    df["label_churn"] = np.where(fut.notna(), (fut < df["bal"] * CHURN_DROP).astype(int), np.nan)
-    df["label_growth"] = np.where(fut.notna(), (fut > df["bal"] * GROWTH_RISE).astype(int), np.nan)
-    df["group"] = np.where(df["has_financial"] == 1, "A", "B")    # 2그룹(재무 유무)
-
-    # 누수 가드: 피처 목록에 금지 컬럼이 섞이지 않았는지 정적 확인
-    leaked = FORBIDDEN_FEATURE_COLS & set(FEATURE_COLS)
-    if leaked:
-        raise AssertionError(f"누수: 미래/라벨 컬럼이 FEATURE_COLS에 포함됨 {leaked}")
-
-    feat_present = [c for c in FEATURE_COLS if c in df.columns]
-    meta = ["corp_code", "base_ym", "TIER", "sector_code", "group"]
-
-    # train: 라벨이 유효한(미래 존재) 행만. inference: base_ym 시점(라벨 없음, 미래 컬럼 제외).
-    train = df[df["bal_future_3m"].notna()][meta + feat_present + ["label_churn", "label_growth"]].copy()
-    inference = df[df["base_ym"] == base_ym][meta + feat_present].copy()
-    return {"train": train.reset_index(drop=True), "inference": inference.reset_index(drop=True)}
+    con = duckdb.connect(":memory:")
+    try:
+        con.register("post_data", post_data)
+        con.register("financial_wide", financial_wide)
+        con.register("macro", macro)
+        con.register("target_master", target_master)
+        df = _run_features(con)
+    finally:
+        con.close()
+    return _split(df, base_ym)
 
 
-def build_features(con: "duckdb.DuckDBPyConnection", settings: "Settings") -> "pd.DataFrame":
-    """DuckDB 결합 래퍼 — RAW/post_data 테이블에서 읽어 build_features_from_frames 호출.
-
-    ingest 연동 후 구현(현재는 build_features_from_frames(프레임) 사용).
-    """
-    raise NotImplementedError(
-        "ingest 연동 후 구현 — 현재는 build_features_from_frames(post_data, financial_wide, macro, "
-        "target_master, base_ym) 사용"
-    )
+def build_features(con: "duckdb.DuckDBPyConnection", settings: "Settings", base_ym: int) -> dict:
+    """DuckDB 테이블 → 피처 SQL 직접 실행(round-trip 없이 대용량 핫패스를 DuckDB가 처리)."""
+    return _split(_run_features(con), base_ym)

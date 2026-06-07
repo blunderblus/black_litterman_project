@@ -21,8 +21,10 @@ def fit_scaler(df: "pd.DataFrame", cols: list[str], path: str | Path | None = No
     params: dict[str, list[float]] = {}
     for c in cols:
         x = df[c].to_numpy(dtype="float64")
-        mu = float(np.nanmean(x)) if len(x) else 0.0
-        sd = float(np.nanstd(x)) if len(x) else 1.0
+        if x.size == 0 or bool(np.all(np.isnan(x))):     # 전부-NaN/빈 컬럼 → 중립(0,1)
+            params[c] = [0.0, 1.0]
+            continue
+        mu, sd = float(np.nanmean(x)), float(np.nanstd(x))
         params[c] = [mu, sd if sd > 1e-12 else 1.0]
     if path is not None:
         p = Path(path)
