@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     ecos_api_key: SecretStr | None = None
     naver_client_id: SecretStr | None = None
     naver_client_secret: SecretStr | None = None
-    bigkinds_api_key: SecretStr | None = None
     gemini_api_key: SecretStr | None = Field(default=None)
+    # 주: BigKinds(구 Track C)는 폐쇄적 API라 사용하지 않음(뉴스는 Naver만).
 
     @model_validator(mode="after")
     def _derive_paths(self) -> Settings:

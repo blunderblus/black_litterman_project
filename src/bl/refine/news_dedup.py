@@ -1,4 +1,7 @@
-"""뉴스 정제 — Kiwi 키워드 백필 + Jaccard 근접중복 제거(BigKinds 우선) → NEWS_REFINED. (과거: 05)"""
+"""뉴스 정제 — Kiwi 키워드 백필 + Jaccard 근접중복 제거 → NEWS_REFINED. (과거: 05)
+
+뉴스 소스는 Naver만 사용한다(BigKinds는 폐쇄적 API라 제외).
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

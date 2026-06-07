@@ -32,6 +32,8 @@ jobs:
           python -m bl.synth.generate
           python -m bl.pipeline
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true        # 워크플로 실행 시 Pages 자동 활성화(Settings 수동 설정 불필요)
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
