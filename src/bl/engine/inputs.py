@@ -1,14 +1,216 @@
-"""BL 입력 — Sigma·Pi(=lambda*Sigma*w_mkt)·P·Q(4축)·Omega(prop 1/DRI^2)·w_mkt·tau → bl_input_data. 단위 정합. (과거: 09, 03 §4-5)"""
+"""BL 입력 빌더 — Σ · Π(=λΣw_mkt) · P · Q(4축) · Ω(∝1/DRI²) · τ 구성.
+
+설계: docs/design/03-bl-model-design.md §4~§5. 과거 노트북 09 대응.
+과거 토이 결함 교정: 앵커를 w_mkt로(현상유지 w_hybrid 아님), Q·Ω·τΣ **단위 정합**(분산정합),
+Ω∝1/DRI²(+§5.4 하한·M_DRI 캡) 보존, confidence 기반 가중(c_cal 데이터기반).
+
+오프라인 검증을 위해 **순수 함수 assemble_bl_inputs(DataFrame+패널)** 를 핵심으로 두고,
+DuckDB 결합 래퍼 build_bl_inputs 는 features/ingest 연동 후 채운다.
+"""
+
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
+
+import numpy as np
+
+from bl.common.logging import get_logger
+from bl.engine.covariance import shrunk_covariance
 
 if TYPE_CHECKING:
     import duckdb
     import pandas as pd
+
     from bl.common.config import Settings
+
+log = get_logger(__name__)
+
+AXIS_WEIGHTS = {"news": 0.35, "pattern": 0.35, "anomaly": 0.15, "relationship": 0.15}
+DRI_WEIGHTS = {"has_financial": 0.3, "has_news": 0.25, "is_listed": 0.15, "trx_activity": 0.2}
+DRI_BASE = 0.1
+DEFAULT_TAU = 0.05
+OMEGA_FLOOR_ETA = 0.05      # Ω 하한 = η·(PτΣPᵀ)kk (§5.4, 과신 폭주 방지)
+M_DRI = 100.0             # 1/DRI² 증폭 상한(§5.4)
+LAMBDA_CLIP = (1.0, 5.0)   # λ 클립 범위(§4.2)
+Q_CLIP_SIGMA = 3.0        # |Q| ≤ Q_CLIP_SIGMA·σ_asset 클립(§5.2)
+
+
+def compute_dri(assets: "pd.DataFrame") -> np.ndarray:
+    """데이터신뢰도지수 DRI ∈ [0.1, 1.0] (설계 §5.4). 결측 구성요소는 0 취급."""
+    n = len(assets)
+    dri = np.full(n, DRI_BASE)
+    for col, w in DRI_WEIGHTS.items():
+        if col in assets.columns:
+            dri = dri + w * assets[col].fillna(0).to_numpy(dtype="float64")
+    return np.clip(dri, DRI_BASE, 1.0)
+
+
+def _zscore(x: np.ndarray) -> np.ndarray:
+    """배치 z-score. 표준편차 0이면 0 벡터(추론 시 고정 스케일러 권장, ADR-0004)."""
+    mu, sd = float(np.mean(x)), float(np.std(x))
+    return (x - mu) / sd if sd > 1e-12 else np.zeros_like(x)
+
+
+def calibrate_lambda(returns_panel, w_mkt: np.ndarray, sigma: np.ndarray, rf: float = 0.0) -> float:
+    """위험회피 λ = (E[r_mkt] − r_f)/σ²_mkt, σ²_mkt = w_mktᵀΣw_mkt, [1,5] 클립(§4.2)."""
+    r = np.asarray(returns_panel, dtype="float64")
+    r_mkt = r @ w_mkt
+    var = float(w_mkt @ np.asarray(sigma, dtype="float64") @ w_mkt)
+    if var <= 1e-18:
+        log.warning("σ²_mkt≈0 → λ 기본값 2.5", extra={"stage": "engine.inputs"})
+        return 2.5
+    lam = (float(np.mean(r_mkt)) - rf) / var
+    if not np.isfinite(lam):
+        log.warning("λ 비유한 → 2.5", extra={"stage": "engine.inputs"})
+        return 2.5
+    clipped = float(np.clip(lam, *LAMBDA_CLIP))
+    if abs(clipped - lam) > 1e-9:
+        log.warning(f"λ={lam:.3f} → [1,5] 클립 {clipped}", extra={"stage": "engine.inputs"})
+    return clipped
+
+
+def build_views(assets: "pd.DataFrame", scaler: dict | None = None) -> np.ndarray:
+    """4축 신호 → (고정 스케일러 또는 배치 z-score) 표준화 → 가중합 q_raw(단위 없음) 반환.
+
+    anomaly 축: 거래흐름(trx_in/out)이 있으면 방향 부호 적용, 없으면 부호 미적용(신호 보존).
+    """
+    n = len(assets)
+    have_flow = "trx_in" in assets.columns and "trx_out" in assets.columns
+
+    def col(name: str, default: float = 0.0) -> np.ndarray:
+        if name not in assets.columns:
+            return np.full(n, default)
+        return assets[name].fillna(default).to_numpy(dtype="float64")
+
+    def axis_raw(name: str) -> np.ndarray:
+        if name == "news":
+            return col("gemini_score")
+        if name == "pattern":
+            return col("prob_growth_raw") - col("prob_churn_raw")
+        if name == "anomaly":
+            a = col("anomaly_score_raw")
+            return a * np.sign(col("trx_in") - col("trx_out")) if have_flow else a
+        if name == "relationship":
+            return col("relationship_score")
+        raise ValueError(name)
+
+    q_raw = np.zeros(n)
+    warned = False
+    for axis, weight in AXIS_WEIGHTS.items():
+        raw = axis_raw(axis)
+        if scaler and axis in scaler:
+            mu, sd = scaler[axis]
+            z = (raw - mu) / sd if sd > 1e-12 else np.zeros_like(raw)
+        else:
+            if not warned:
+                log.warning(
+                    "고정 스케일러 미주입 → 배치 z-score 폴백(추론 누수 위험, ADR-0004)",
+                    extra={"stage": "engine.inputs"},
+                )
+                warned = True
+            z = _zscore(raw)
+        q_raw = q_raw + weight * z
+    return q_raw
+
+
+def _norm_weights(x: np.ndarray) -> np.ndarray:
+    """음수 클립 후 합=1 정규화. NaN/Inf는 앵커 손상을 막기 위해 거부(균등붕괴 금지)."""
+    x = np.asarray(x, dtype="float64")
+    if not np.isfinite(x).all():
+        raise ValueError("가중치에 NaN/Inf 가 있습니다(앵커 무음 균등붕괴 방지).")
+    x = np.clip(x, 0.0, None)
+    s = x.sum()
+    return x / s if s > 0 else np.full(len(x), 1.0 / len(x))
+
+
+def assemble_bl_inputs(
+    assets: "pd.DataFrame",
+    returns_panel,
+    *,
+    tau: float = DEFAULT_TAU,
+    risk_aversion: float | None = None,
+    rf: float = 0.0,
+    scaler: dict | None = None,
+    conf_cal: float | None = None,
+    preference: str | None = None,
+) -> dict:
+    """자산 메타(assets)와 수익률 패널(T×N)로 BL 입력 dict를 구성한다(절대뷰 P=I).
+
+    Q는 분산정합(Var(Q)=τ·mean(diagΣ))으로 τΣ·Ω와 단위를 맞추고 |Q|≤3σ로 클립한다.
+    Ω = base·min(1/DRI²,M_DRI)·((1−conf)/c_cal), base=τΣkk, 하한 η·base. c_cal=mean(1−conf).
+    """
+    n = len(assets)
+    panel = np.asarray(returns_panel, dtype="float64")
+    if panel.ndim != 2 or panel.shape[1] != n:
+        raise ValueError(f"returns_panel shape {panel.shape} 는 (T,{n}) 여야 합니다.")
+
+    tickers = (
+        assets["corp_code"].astype("string").tolist()
+        if "corp_code" in assets.columns else list(map(str, range(n)))
+    )
+    if len(set(tickers)) != len(tickers):
+        raise ValueError("중복 corp_code(자산)가 있습니다 — ID_CROSSWALK dedup 필요(§9.4 자산 유일성).")
+
+    sigma = shrunk_covariance(panel, preference)          # FULL 공분산(PSD 보장)
+
+    if "w_mkt" in assets.columns:
+        w_mkt = _norm_weights(assets["w_mkt"].to_numpy(dtype="float64"))
+    elif "wallet_size" in assets.columns:
+        w_mkt = _norm_weights(assets["wallet_size"].to_numpy(dtype="float64"))
+    else:
+        raise ValueError("assets 에 'w_mkt' 또는 'wallet_size' 컬럼이 필요합니다.")
+    w_current = (
+        _norm_weights(assets["w_current"].to_numpy(dtype="float64"))
+        if "w_current" in assets.columns else w_mkt.copy()
+    )
+
+    lam = risk_aversion if risk_aversion is not None else calibrate_lambda(panel, w_mkt, sigma, rf)
+    pi = lam * (sigma @ w_mkt)                             # 내재균형수익 Π=λΣw_mkt
+    dri = compute_dri(assets)
+
+    # Q 단위정합: c = sqrt(τ·mean(diagΣ)/Var(q_raw)) → Var(Q)=τ·mean(diagΣ) (§5.2 method 2)
+    q_raw = build_views(assets, scaler)
+    mean_var = float(np.mean(np.diag(sigma)))
+    var_qraw = float(np.var(q_raw))
+    c = math.sqrt(tau * mean_var / var_qraw) if var_qraw > 1e-18 else 0.0
+    q = q_raw * c
+    q_clip = Q_CLIP_SIGMA * math.sqrt(max(mean_var, 1e-18))
+    q = np.clip(q, -q_clip, q_clip)                       # |Q| ≤ 3σ_asset
+
+    # Ω: base=(PτΣPᵀ)kk=τΣkk, ∝1/DRI²(캡 M_DRI), confidence 보정(c_cal=mean(1−conf)), 하한 η·base
+    base = tau * np.diag(sigma)
+    cg = assets["confidence_growth"].fillna(0.5).to_numpy("float64") \
+        if "confidence_growth" in assets.columns else np.full(n, 0.5)
+    gc = assets["gemini_confidence"].fillna(0.5).to_numpy("float64") \
+        if "gemini_confidence" in assets.columns else np.full(n, 0.5)
+    conf = np.clip((cg + gc) / 2.0, 0.0, 1.0)
+    ccal = conf_cal if conf_cal is not None else float(np.clip(np.mean(1.0 - conf), 0.05, 1.0))
+    inv_dri2 = np.minimum(1.0 / dri**2, M_DRI)
+    omega_diag = base * inv_dri2 * ((1.0 - conf) / ccal)
+    omega_diag = np.maximum(omega_diag, OMEGA_FLOOR_ETA * base)
+
+    return {
+        "tickers": tickers,
+        "Sigma": sigma,
+        "pi": pi,
+        "P": np.eye(n),
+        "Q": q,
+        "Omega": np.diag(omega_diag),
+        "tau": tau,
+        "w_mkt": w_mkt,
+        "w_current": w_current,
+        "DRI": dri,
+        "lambda": lam,
+        "metadata": {"n": n, "q_scale": c, "c_cal": ccal, "axis_weights": AXIS_WEIGHTS},
+    }
 
 
 def build_bl_inputs(con: "duckdb.DuckDBPyConnection", settings: "Settings", base_ym: int) -> dict:
-    """ml_master+ML_PREDICTIONS+COMPANY_SENTIMENT+post_data 결합 -> BL 입력 dict(parquet 저장)."""
-    raise NotImplementedError("P4에서 구현 — 설계 문서 참조")
+    """DuckDB(ml_master+ML_PREDICTIONS+COMPANY_SENTIMENT+post_data) 결합 → assemble_bl_inputs.
+
+    features/models/ingest 연동 후 구현(현재는 assemble_bl_inputs 를 직접 사용).
+    """
+    raise NotImplementedError(
+        "features/models 연동 후 구현 — 현재는 assemble_bl_inputs(assets_df, returns_panel) 사용"
+    )
