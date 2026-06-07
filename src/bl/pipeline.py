@@ -218,7 +218,8 @@ def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, to
     return result
 
 
-def load_frames(settings, sample_dir: str | Path = "data/sample", raw_dir: str | Path = "data/raw") -> dict:
+def load_frames(settings, sample_dir: str | Path = "data/sample", raw_dir: str | Path = "data/raw",
+                base_ym: int = DEFAULT_BASE_YM) -> dict:
     """키가 있으면 ingest로 실데이터 프레임을, 없으면 합성 sample을 반환(동일 다운스트림).
 
     내부 소스(target_master/post_data)는 raw_dir(접근통제), 외부(재무/매크로/뉴스)는 공식 API.
@@ -254,7 +255,9 @@ def load_frames(settings, sample_dir: str | Path = "data/sample", raw_dir: str |
     fin = _try(lambda: ing_fin.collect_financial(settings, corp_codes, years), "financial")
     mac = _try(lambda: ing_mac.collect_macro(settings, months[0], months[-1]), "macro")
     news = _try(lambda: ing_news.collect_news(settings, targets), "news")
-    sent = enr.score_sentiment(news, settings) if news is not None and len(news) else None
+    # base_ym 시점 컷오프로 추론월 이후 뉴스 유입 차단(누수 방지, enrich.sentiment._cutoff_news)
+    sent = (enr.score_sentiment(news, settings, base_ym=base_ym)
+            if news is not None and len(news) else None)
 
     sample = _load_sample(sample_dir) if (fin is None or mac is None or sent is None) else None
     return {
@@ -274,7 +277,7 @@ def run(
     from bl.common.config import get_settings
 
     s = settings or get_settings()
-    frames = load_frames(s, sample_dir=sample_dir, raw_dir=raw_dir)
+    frames = load_frames(s, sample_dir=sample_dir, raw_dir=raw_dir, base_ym=base_ym)
     src = "synthetic-demo" if (s.env == "demo" or s.dart_api_key is None) else "live"
     return _pipeline_from_frames(frames, out_dir=out_dir, base_ym=base_ym, top_n=top_n,
                                  seed=seed, render=render, source=src)
