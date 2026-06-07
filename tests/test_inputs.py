@@ -1,4 +1,4 @@
-"""BL 입력 빌더 테스트 — Π=λΣw_mkt 앵커, 4축 Q, Ω∝1/DRI²·하한, 단위정합."""
+"""BL 입력 빌더 테스트 — Π=λΣw_mkt 앵커, 3축 Q, Ω∝1/DRI²·anomaly·하한, 단위정합."""
 
 from __future__ import annotations
 
@@ -115,12 +115,63 @@ def test_duplicate_corp_code_raises() -> None:
         bi.assemble_bl_inputs(a, _panel(4))
 
 
-def test_anomaly_unsigned_without_flow() -> None:
-    # 거래흐름 컬럼 부재 시 anomaly 신호가 sign(0)=0 으로 죽지 않음(리뷰 #9)
+def test_axis_weights_three_axes_sum_one() -> None:
+    # 뷰 축은 3개(news/pattern/relationship)이고 합=1. anomaly 는 뷰가 아님(E2 이전).
+    assert set(bi.AXIS_WEIGHTS) == {"news", "pattern", "relationship"}
+    assert "anomaly" not in bi.AXIS_WEIGHTS
+    assert abs(sum(bi.AXIS_WEIGHTS.values()) - 1.0) < 1e-9
+
+
+def test_anomaly_not_a_view_axis() -> None:
+    # anomaly 만 있는 자산은 뷰 축이 없으므로 q_raw=0(과거: 4번째 뷰로 신호 보존했음 — 폐기)
     n = 6
     df = pd.DataFrame({
         "corp_code": [f"{i:08d}" for i in range(n)],
-        "anomaly_score_raw": np.linspace(0.1, 0.9, n),  # 변동 있는 anomaly
-    })  # trx_in/out 없음, 다른 축 없음
+        "anomaly_score_raw": np.linspace(0.1, 0.9, n),
+    })  # news/pattern/relationship 축 컬럼 없음
     q_raw = bi.build_views(df)
-    assert float(np.std(q_raw)) > 0  # anomaly 신호가 보존됨
+    assert float(np.std(q_raw)) == 0.0      # anomaly 는 Q(방향)에 기여하지 않음
+    assert np.allclose(q_raw, 0.0)
+
+
+def test_omega_monotonic_increasing_in_anomaly() -> None:
+    # anomaly_score 0→1 증가 시 해당 법인 omega_diag 단조 증가(이상할수록 뷰 불신 → Ω 팽창)
+    a = _assets(6)
+    panel = _panel(6)
+
+    def omega(score):
+        b = a.copy()
+        b["anomaly_score_raw"] = score
+        return np.diag(bi.assemble_bl_inputs(b, panel)["Omega"])
+    o0, o_mid, o1 = omega(0.0), omega(0.5), omega(1.0)
+    assert (o_mid >= o0 - 1e-18).all() and (o1 >= o_mid - 1e-18).all()  # 단조 비감소
+    assert (o1 > o0).all()                          # 엄격 증가(하한 미구속 영역)
+    # γ=2 → anomaly=1 곱수 3배: 하한이 안 무는 한 ~3× (유계 [1,1+γ])
+    assert o1.sum() > 1.5 * o0.sum()
+
+
+def test_omega_anomaly_zero_equals_absent_graceful() -> None:
+    # anomaly_score_raw 컬럼 없을 때 graceful(요인 1) → anomaly=0 과 동일 Ω
+    a = _assets(6)
+    panel = _panel(6)
+    a0 = a.copy()
+    a0["anomaly_score_raw"] = 0.0
+    a_absent = a.drop(columns=["anomaly_score_raw"])
+    o0 = np.diag(bi.assemble_bl_inputs(a0, panel)["Omega"])
+    on = np.diag(bi.assemble_bl_inputs(a_absent, panel)["Omega"])
+    assert np.allclose(o0, on)                       # 결측 → 요인 1 == anomaly 0
+    assert bi.assemble_bl_inputs(a0, panel)["metadata"]["gamma_anom"] == bi.GAMMA_ANOM
+
+
+def test_gamma_anom_override_scales_omega() -> None:
+    # gamma_anom override: γ=0 이면 anomaly 무효(Ω 변조 없음), 클수록 Ω↑
+    a = _assets(6)
+    a["anomaly_score_raw"] = 0.8
+    panel = _panel(6)
+    o_g0 = np.diag(bi.assemble_bl_inputs(a, panel, gamma_anom=0.0)["Omega"])
+    o_g4 = np.diag(bi.assemble_bl_inputs(a, panel, gamma_anom=4.0)["Omega"])
+    a_no = a.copy()
+    a_no["anomaly_score_raw"] = 0.0
+    o_base = np.diag(bi.assemble_bl_inputs(a_no, panel)["Omega"])
+    assert np.allclose(o_g0, o_base)                 # γ=0 → anomaly 무효
+    assert (o_g4 > o_g0).all()

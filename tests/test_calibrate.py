@@ -22,13 +22,14 @@ def test_sweep_tau_structure() -> None:
 def test_calibrate_axis_weights_structure() -> None:
     frames = _load_sample("data/sample")
     grid = [dict(cal.AXIS_WEIGHTS),
-            {"news": 0.25, "pattern": 0.45, "anomaly": 0.15, "relationship": 0.15}]
+            {"news": 0.30, "pattern": 0.50, "relationship": 0.20}]
     df, best = cal.calibrate_axis_weights(frames, grid=grid, step=6)
     assert len(df) == 2
-    assert {"news", "pattern", "anomaly", "relationship", "mean_ic"} <= set(df.columns)
+    assert {"news", "pattern", "relationship", "mean_ic"} <= set(df.columns)
+    assert "anomaly" not in df.columns                    # anomaly 는 뷰 축이 아님(E2 이전)
     assert np.isfinite(best["mean_ic"])
-    s = best["news"] + best["pattern"] + best["anomaly"] + best["relationship"]
-    assert np.isclose(s, 1.0)                              # 최적 축가중도 합=1
+    s = best["news"] + best["pattern"] + best["relationship"]
+    assert np.isclose(s, 1.0)                              # 최적 축가중도 합=1(3축)
 
 
 def test_calibrate_omega_scale_structure() -> None:
@@ -36,4 +37,12 @@ def test_calibrate_omega_scale_structure() -> None:
     df, best = cal.calibrate_omega_scale(frames, scales=(0.5, 2.0), step=6)
     assert len(df) == 2 and "omega_scale" in df.columns
     assert best.get("omega_scale") in (0.5, 2.0)
+    assert np.isfinite(best.get("lift_bl_vs_market", float("nan")))
+
+
+def test_calibrate_gamma_anom_structure() -> None:
+    frames = _load_sample("data/sample")
+    df, best = cal.calibrate_gamma_anom(frames, gammas=(0.0, 2.0), step=6)
+    assert len(df) == 2 and "gamma_anom" in df.columns
+    assert best.get("gamma_anom") in (0.0, 2.0)
     assert np.isfinite(best.get("lift_bl_vs_market", float("nan")))

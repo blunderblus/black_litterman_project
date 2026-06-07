@@ -1,4 +1,4 @@
-"""BL 입력 빌더 — Σ · Π(=λΣw_mkt) · P · Q(4축) · Ω(∝1/DRI²) · τ 구성.
+"""BL 입력 빌더 — Σ · Π(=λΣw_mkt) · P · Q(3축) · Ω(∝1/DRI²·anomaly) · τ 구성.
 
 설계: docs/design/03-bl-model-design.md §4~§5. 과거 노트북 09 대응.
 과거 토이 결함 교정: 앵커를 w_mkt로(현상유지 w_hybrid 아님), Q·Ω·τΣ **단위 정합**(분산정합),
@@ -23,12 +23,18 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-AXIS_WEIGHTS = {"news": 0.35, "pattern": 0.35, "anomaly": 0.15, "relationship": 0.15}
+# 뷰 3축 가중(합=1). anomaly 는 방향 뷰가 아니라 Ω 신뢰도 변조 요인으로 이전(E2 해소):
+# 과거 4축 (news,pattern,anomaly,relationship)=(0.35,0.35,0.15,0.15)에서 anomaly 를 빼고 남은
+# 3축을 비율 보존 재정규화 → (0.35,0.35,0.15)/0.85 ≈ (0.412,0.412,0.176).
+AXIS_WEIGHTS = {"news": 0.412, "pattern": 0.412, "relationship": 0.176}
 DRI_WEIGHTS = {"has_financial": 0.3, "has_news": 0.25, "is_listed": 0.15, "trx_activity": 0.2}
 DRI_BASE = 0.1
 DEFAULT_TAU = 0.05
 OMEGA_FLOOR_ETA = 0.05      # Ω 하한 = η·(PτΣPᵀ)kk (§5.4, 과신 폭주 방지)
 M_DRI = 100.0             # 1/DRI² 증폭 상한(§5.4)
+# anomaly_score(이상 크기, in-distribution 여부)에 의한 Ω 팽창 게인. DRI·conf 와 같은 신뢰도 요인.
+# 추정 대상이 아닌 기본값이며, 추후 eval.calibrate(calibrate_gamma_anom)에서 실현 적중률로 캘리브레이션한다.
+GAMMA_ANOM = 2.0
 LAMBDA_CLIP = (1.0, 5.0)   # λ 클립 범위(§4.2)
 Q_CLIP_SIGMA = 3.0        # |Q| ≤ Q_CLIP_SIGMA·σ_asset 클립(§5.2)
 
@@ -70,14 +76,14 @@ def calibrate_lambda(returns_panel, w_mkt: np.ndarray, sigma: np.ndarray, rf: fl
 def build_views(
     assets: pd.DataFrame, scaler: dict | None = None, axis_weights: dict | None = None
 ) -> np.ndarray:
-    """4축 신호 → (고정 스케일러 또는 배치 z-score) 표준화 → 가중합 q_raw(단위 없음) 반환.
+    """3축 신호(news/pattern/relationship) → (고정 스케일러 또는 배치 z-score) 표준화 →
+    가중합 q_raw(단위 없음) 반환.
 
-    anomaly 축: 거래흐름(trx_in/out)이 있으면 방향 부호 적용, 없으면 부호 미적용(신호 보존).
     axis_weights 미지정 시 모듈 기본 AXIS_WEIGHTS 사용 — 백테스트 역산(eval.calibrate)이
-    이 가중을 override 해 실현 IC 로 추정값을 찾는다.
+    이 가중을 override 해 실현 IC 로 추정값을 찾는다. anomaly 는 방향 뷰가 아니라 Ω 신뢰도
+    변조 요인(assemble_bl_inputs)이므로 Q 에는 포함하지 않는다.
     """
     n = len(assets)
-    have_flow = "trx_in" in assets.columns and "trx_out" in assets.columns
 
     def col(name: str, default: float = 0.0) -> np.ndarray:
         if name not in assets.columns:
@@ -89,9 +95,6 @@ def build_views(
             return col("gemini_score")
         if name == "pattern":
             return col("prob_growth_raw") - col("prob_churn_raw")
-        if name == "anomaly":
-            a = col("anomaly_score_raw")
-            return a * np.sign(col("trx_in") - col("trx_out")) if have_flow else a
         if name == "relationship":
             return col("relationship_score")
         raise ValueError(name)
@@ -136,12 +139,15 @@ def assemble_bl_inputs(
     conf_cal: float | None = None,
     axis_weights: dict | None = None,
     omega_scale: float = 1.0,
+    gamma_anom: float | None = None,
     preference: str | None = None,
 ) -> dict:
     """자산 메타(assets)와 수익률 패널(T×N)로 BL 입력 dict를 구성한다(절대뷰 P=I).
 
     Q는 분산정합(Var(Q)=τ·mean(diagΣ))으로 τΣ·Ω와 단위를 맞추고 |Q|≤3σ로 클립한다.
-    Ω = base·min(1/DRI²,M_DRI)·((1−conf)/c_cal), base=τΣkk, 하한 η·base. c_cal=mean(1−conf).
+    Ω = base·min(1/DRI²,M_DRI)·((1−conf)/c_cal)·(1+γ_anom·anomaly), base=τΣkk, 하한 η·base.
+    anomaly(이상 크기 ∈[0,1])는 in-distribution 신뢰도 신호로 Ω 를 팽창시킨다(방향 뷰 아님).
+    gamma_anom 미지정 시 모듈 GAMMA_ANOM 사용(eval.calibrate 가 실현지표로 역산).
     """
     n = len(assets)
     panel = np.asarray(returns_panel, dtype="float64")
@@ -181,7 +187,8 @@ def assemble_bl_inputs(
     q_clip = Q_CLIP_SIGMA * math.sqrt(max(mean_var, 1e-18))
     q = np.clip(q, -q_clip, q_clip)                       # |Q| ≤ 3σ_asset
 
-    # Ω: base=(PτΣPᵀ)kk=τΣkk, ∝1/DRI²(캡 M_DRI), confidence 보정(c_cal=mean(1−conf)), 하한 η·base
+    # Ω: base=(PτΣPᵀ)kk=τΣkk, ∝1/DRI²(캡 M_DRI), confidence 보정(c_cal=mean(1−conf)),
+    #    anomaly 신뢰도 변조(1+γ·anomaly), 하한 η·base
     base = tau * np.diag(sigma)
     cg = assets["confidence_growth"].fillna(0.5).to_numpy("float64") \
         if "confidence_growth" in assets.columns else np.full(n, 0.5)
@@ -190,8 +197,14 @@ def assemble_bl_inputs(
     conf = np.clip((cg + gc) / 2.0, 0.0, 1.0)
     ccal = conf_cal if conf_cal is not None else float(np.clip(np.mean(1.0 - conf), 0.05, 1.0))
     inv_dri2 = np.minimum(1.0 / dri**2, M_DRI)
-    omega_diag = base * inv_dri2 * ((1.0 - conf) / ccal) * float(omega_scale)
-    omega_diag = np.maximum(omega_diag, OMEGA_FLOOR_ETA * base)  # 하한은 scale 무관 안전장치
+    # anomaly_score_raw ∈[0,1](이상 크기). 결측/부재 시 0 → 요인 1(graceful). DRI·conf 형제 신뢰도 요인:
+    # 이상할수록 Ω↑ → 그 법인 뷰가 prior(앵커)로 후퇴(= T2 cold-start 후퇴와 동일 메커니즘).
+    gamma = GAMMA_ANOM if gamma_anom is None else float(gamma_anom)
+    anomaly = (np.clip(assets["anomaly_score_raw"].fillna(0.0).to_numpy("float64"), 0.0, 1.0)
+               if "anomaly_score_raw" in assets.columns else np.zeros(n))
+    anom_factor = 1.0 + gamma * anomaly                   # ∈[1, 1+γ] 유계(수치 안전)
+    omega_diag = base * inv_dri2 * ((1.0 - conf) / ccal) * anom_factor * float(omega_scale)
+    omega_diag = np.maximum(omega_diag, OMEGA_FLOOR_ETA * base)  # 하한은 scale·anomaly 무관 안전장치
 
     return {
         "tickers": tickers,
@@ -206,5 +219,6 @@ def assemble_bl_inputs(
         "DRI": dri,
         "lambda": lam,
         "metadata": {"n": n, "q_scale": c, "c_cal": ccal,
-                     "axis_weights": axis_weights or AXIS_WEIGHTS, "omega_scale": float(omega_scale)},
+                     "axis_weights": axis_weights or AXIS_WEIGHTS, "omega_scale": float(omega_scale),
+                     "gamma_anom": gamma},
     }

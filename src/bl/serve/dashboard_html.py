@@ -117,9 +117,9 @@ INDEX_HTML = r"""<!DOCTYPE html>
       '<div class="d-sec">CORP_PROFILE</div>'+
       row('NAME',r.corp_name||r.corp_code)+row('TIER/SECTOR',(r.tier||'-')+' / '+(r.sector_code||'-'))+
       row('REGION',r.region||'-')+row('CURRENT_BAL',eok(r.current_bal))+
-      '<div class="d-sec">MODEL_OPINION (4축)</div>'+
+      '<div class="d-sec">MODEL_OPINION</div>'+
       row('GROWTH P',pct(r.prob_growth_raw))+row('CHURN P',pct(r.prob_churn_raw))+
-      row('ANOMALY',num(r.anomaly_score_raw,3))+row('NEWS',num(r.news_sentiment,3))+
+      row('ANOMALY(이상도·신뢰↓)',num(r.anomaly_score_raw,3))+row('NEWS',num(r.news_sentiment,3))+
       '<div class="d-sec">BLACK-LITTERMAN</div>'+
       row('Π / Q / Ω',num(r.pi,5)+' / '+num(r.q,5)+' / '+num(r.omega,5))+
       row('E[R]',num(r.bl_return,5))+row('W cur→tgt',num(r.current_weight,5)+' → '+num(r.target_weight,5))+

@@ -1,8 +1,8 @@
 """BL — AI 기반 Black-Litterman 법인 마케팅 최적화 시스템.
 
 자산=법인 고객, 기대수익=예금유치·유지 가치(CLV proxy), 시장가중치=지갑(예금) 규모 비중,
-투자자 전망(View)=AI 4축 신호(Gemini 감성·XGBoost 성장/이탈·IsolationForest 이상·거래관계),
-전망 불확실성 Ω=데이터신뢰도(DRI)+모델 confidence.
+투자자 전망(View)=AI 3축 신호(news=Gemini 감성·pattern=XGBoost 성장/이탈·relationship=거래관계),
+전망 불확실성 Ω=데이터신뢰도(DRI)·모델 confidence·이상도(IsolationForest anomaly).
 
 설계 문서: docs/design/01-system-architecture.md (패키지 레이아웃 권위 소스).
 

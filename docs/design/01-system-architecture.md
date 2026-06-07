@@ -34,15 +34,15 @@
 
 ## 1.1 핵심 은유 매핑 (아키텍처 전제)
 
-시스템 전반의 데이터 모델과 컴포넌트는 다음 금융공학→마케팅 은유에 정렬되어야 한다. 특히 **"AI 모델 3종(신호 생산자)"과 "BL 뷰 4축(신호 소비 단위)"은 별개 개념**임에 유의한다(§1.3 참조).
+시스템 전반의 데이터 모델과 컴포넌트는 다음 금융공학→마케팅 은유에 정렬되어야 한다. 특히 **"AI 모델 3종(신호 생산자)"과 "BL 뷰 3축(신호 소비 단위)"은 별개 개념**임에 유의한다(§1.3 참조).
 
 | 금융공학 개념 | 마케팅 개념 | 본 시스템에서의 실체 |
 |---|---|---|
 | 자산(asset) | 법인 고객사 | `TARGET_MASTER.TARGET_ID` (corp_code 기반) |
 | 기대수익률 | 예금유치/유지 가치(CLV proxy) | BL 사후 기대수익 $E[R]$ |
 | 시장 균형 가중치 $w_{mkt}$ | 고객 예금(지갑) 규모 비중 | 재무보유 고객은 `FINANCIAL_WIDE.cash_amount` 기반, 비재무·T3 가상노드는 섹터중앙값 배수로 추정한 `wallet_size` 비중(상세 [03 BL §4.1](./03-bl-model-design.md)) |
-| 투자자 전망(View, Q) | BL 뷰 4축 앙상블 | **AI 3종 모델 신호**(XGBoost 성장/이탈, IsolationForest 이상, Gemini 뉴스감성)에 **거래관계 피처**(post_data)를 더해 **4축(news/pattern/anomaly/relationship)**으로 결합한 $Q_{\text{final}}$ |
-| 전망 불확실성 $\Omega$ | 신호 신뢰도 | 데이터신뢰도(DRI) + 모델 confidence ($\Omega\propto 1/\text{DRI}^2$) |
+| 투자자 전망(View, Q) | BL 뷰 3축 앙상블 | **AI 신호**(XGBoost 성장/이탈, Gemini 뉴스감성)에 **거래관계 피처**(post_data)를 더해 **3축(news/pattern/relationship)**으로 결합한 $Q_{\text{final}}$ |
+| 전망 불확실성 $\Omega$ | 신호 신뢰도 | 데이터신뢰도(DRI) + 모델 confidence + 이상도(IsolationForest `anomaly_score_raw`) ($\Omega\propto 1/\text{DRI}^2$, 이상도는 곱수 $1+\gamma_{\text{anom}}a$로 변조) |
 
 > `w_mkt` 실체는 본 문서에서 단정하지 않고 [03 BL §4.1](./03-bl-model-design.md)에 위임한다(`cash_amount`는 재무제표 보유 고객에만 적용, 비재무/가상노드는 섹터중앙값 배수 추정).
 
@@ -51,15 +51,16 @@
 - **Tier(고객축):** T1 상장 외감 / T2 비상장 중소 / T3 가상 섹터 노드(`IS_VIRTUAL`)
 - **Track(수집축):** A 매크로(한국은행 ECOS 금리·BSI, FinanceDataReader 지수) / B Naver 뉴스
 
-## 1.3 "AI 3종 모델" vs "BL 뷰 4축" (개념 분리)
+## 1.3 "AI 3종 모델" vs "BL 뷰 3축(+anomaly Ω 요인)" (개념 분리)
 
 혼동을 막기 위해 두 개념을 명시적으로 분리한다.
 
 - **AI 모델 3종(생산자):** `XGBoost`(성장/이탈 분류), `IsolationForest`(이상탐지), `Gemini`(뉴스 감성). 이들은 모델 학습/추론으로 **신호를 생산**한다(레이어 3·4).
-- **BL 뷰 4축(소비 단위):** BL 엔진이 뷰값 $Q$를 구성할 때 결합하는 4개 축 — `news`(Gemini 감성), `pattern`(XGBoost 성장−이탈), `anomaly`(IsolationForest×자금흐름 방향), `relationship`(거래관계 강도: 계좌수·급여이체·주거래). **`relationship`은 모델 산출이 아니라 `post_data` 거래관계 피처에서 직접 유래**한다.
-- 축 가중 $a=(0.35\,\text{news},\,0.35\,\text{pattern},\,0.15\,\text{anomaly},\,0.15\,\text{relationship})$, 합=1(상세 [03 BL §5.1](./03-bl-model-design.md)).
+- **BL 뷰 3축(소비 단위):** BL 엔진이 뷰값 $Q$를 구성할 때 결합하는 3개 축 — `news`(Gemini 감성), `pattern`(XGBoost 성장−이탈), `relationship`(거래관계 강도: 계좌수·급여이체·주거래). **`relationship`은 모델 산출이 아니라 `post_data` 거래관계 피처에서 직접 유래**한다.
+- 축 가중 $a=(0.412\,\text{news},\,0.412\,\text{pattern},\,0.176\,\text{relationship})$, 합=1(상세 [03 BL §5.1](./03-bl-model-design.md)). 과거 4축 $(0.35,0.35,0.15,0.15)$에서 anomaly 제외 후 비율보존 재정규화한 값이다.
+- **anomaly는 뷰 축이 아니라 $\Omega$ 요인이다(E2 교정):** `IsolationForest` `anomaly_score_raw`$\in[0,1]$는 부호 없는 *이상 크기*로, $Q$에 기여하지 않고 $\Omega$를 곱수 $(1+\gamma_{\text{anom}}\,a)$($\gamma_{\text{anom}}=2.0$)로 팽창시켜 이상한 법인의 뷰를 prior(앵커)로 후퇴시킨다(DRI·confidence와 형제인 신뢰도 신호). 과거 anomaly에 자금흐름 부호를 곱해 4번째 방향 뷰로 쓰던 설계는 pattern 축과 중복 계상되어 폐기했다(상세 [03 BL §5.4](./03-bl-model-design.md)).
 
-즉 AI 모델은 3종이지만 BL 뷰는 4축이며, 4번째 축(relationship)의 입력원은 내부 `post_data`다. 본 문서·§11은 일관되게 **"4축"**을 뷰 정의로 사용한다.
+즉 AI 모델은 3종이고 BL 뷰는 3축이며, 3번째 축(relationship)의 입력원은 내부 `post_data`다. anomaly는 별도 $\Omega$ 신뢰도 변조 요인으로 분리한다. 본 문서·§11은 일관되게 **"3축"**을 뷰 정의로 사용한다.
 
 ---
 
@@ -207,7 +208,7 @@ flowchart LR
   CC -.-> L6
 ```
 
-> `post_data`는 외부 API(`EXT`)와 분리된 내부 접근통제 소스이며, 수집 시 `corp_code`(또는 `jurir_no`)를 crosswalk로 정규화해 결합한다([02 파이프라인 §1](./02-data-pipeline.md)). `relationship` 축(BL 4축)·`w_current`·`funding_gap`은 모두 `post_data`를 필수 입력으로 한다.
+> `post_data`는 외부 API(`EXT`)와 분리된 내부 접근통제 소스이며, 수집 시 `corp_code`(또는 `jurir_no`)를 crosswalk로 정규화해 결합한다([02 파이프라인 §1](./02-data-pipeline.md)). `relationship` 축(BL 3축)·`w_current`·`funding_gap`은 모두 `post_data`를 필수 입력으로 한다.
 
 ## 3.2 레이어별 책임 요약
 
@@ -217,7 +218,7 @@ flowchart LR
 | 2 | **저장(Storage)** | DuckDB(수집/OLAP) + Parquet(분석/교환). 이중적재 lineage(RAW_FINANCIAL+FINANCIAL_WIDE). **ID crosswalk** 관리. | (인프라) |
 | 3 | **처리·피처(Processing)** | 뉴스 dedup, Gemini 감성 enrich, 시점 분리 피처(재무·매크로·감성·거래관계) 생성. | 05 뉴스정제, 06 gemini, 07 전처리 |
 | 4 | **모델(ML)** | XGBoost 성장/이탈 분류, IsolationForest 이상탐지. 시점 분리 검증, 스케일러/모델 저장. | 08 모델학습 |
-| 5 | **BL 엔진(BL Engine)** | 뷰 행렬 P·Q·Ω(4축), FULL 공분산 Σ, $w_{mkt}$ 구성 → 사후 기대수익·최적 가중. | 09 BL입력, 10 BL최적화 |
+| 5 | **BL 엔진(BL Engine)** | 뷰 행렬 P·Q(3축)·Ω, FULL 공분산 Σ, $w_{mkt}$ 구성 → 사후 기대수익·최적 가중. | 09 BL입력, 10 BL최적화 |
 | 6 | **서빙·대시보드(Serving)** | 분석 마트 생성, 외부 JSON 추출, Quarto+Plotly 파라미터화 대시보드, GitHub Pages 정적 배포. | 11 / 11-1 대시보드 |
 | × | **공통(common)** | 설정/IO/연산백엔드/로깅 등 횡단 관심사. 모든 레이어가 참조 가능. | (신규) |
 
@@ -278,15 +279,15 @@ flowchart TD
 | 컴포넌트 | 책임 | 입력 | 출력 | 검증 |
 |---|---|---|---|---|
 | `models.growth_churn` | XGBoost 성장/이탈 분류 → BL `pattern` 축 원천. | `features.parquet` (시점 train/valid/test) | `ml_predictions.parquet` (`growth_score_xgb`, churn_prob, as_of_date) | walk-forward, SHAP 설명 |
-| `models.anomaly` | IsolationForest 이상탐지 → BL `anomaly` 축/사전필터. | `features.parquet` | `ml_predictions.parquet` (`anomaly_score_if`) | 시점 분리, 학습기준 스케일 |
+| `models.anomaly` | IsolationForest 이상탐지 → BL `anomaly` Ω 신뢰도 변조 요인/사전필터. | `features.parquet` | `ml_predictions.parquet` (`anomaly_score_if`) | 시점 분리, 학습기준 스케일 |
 
-> 2그룹(재무 유무) 모델링 전략을 보존한다. 모든 예측에 `as_of_date`/`base_ym`을 부착해 재무·매크로와 시점 정합을 보장한다. 이 모델들은 BL 4축 중 `pattern`·`anomaly`를 생산하고, `news`는 `enrich`(Gemini), `relationship`은 `post_data`에서 온다(§1.3).
+> 2그룹(재무 유무) 모델링 전략을 보존한다. 모든 예측에 `as_of_date`/`base_ym`을 부착해 재무·매크로와 시점 정합을 보장한다. 이 모델들은 BL 뷰 `pattern` 축과 `anomaly` Ω 요인을 생산하고, `news` 축은 `enrich`(Gemini), `relationship` 축은 `post_data`에서 온다(§1.3). `anomaly_score_raw`는 뷰 $Q$가 아니라 $\Omega$ 신뢰도 변조 곱수 $(1+\gamma_{\text{anom}}\,a)$로만 쓰인다([03 BL §5.4](./03-bl-model-design.md)).
 
 ## 4.4 BL 엔진 레이어
 
 | 컴포넌트 | 책임 | 입력 | 출력 | 방법론 정합 |
 |---|---|---|---|---|
-| `bl.inputs` | P(뷰행렬)·Q(4축 뷰값)·Ω(불확실성)·Σ(FULL 공분산)·$w_{mkt}$·$w_{current}$ 구성. | ML 예측(pattern/anomaly), 감성(news), `post_data`(relationship·`w_current`), `FINANCIAL_WIDE`(wallet) | BL 입력 행렬 묶음 | Σ는 log-return 공분산 + Ledoit-Wolf 수축; $\Omega\propto 1/\text{DRI}^2$; $\Pi=\lambda\Sigma w_{mkt}$; 4축 결합 가중 $a=(0.35,0.35,0.15,0.15)$ |
+| `bl.inputs` | P(뷰행렬)·Q(3축 뷰값)·Ω(불확실성)·Σ(FULL 공분산)·$w_{mkt}$·$w_{current}$ 구성. | ML 예측(pattern + anomaly는 Ω 요인), 감성(news), `post_data`(relationship·`w_current`), `FINANCIAL_WIDE`(wallet) | BL 입력 행렬 묶음 | Σ는 log-return 공분산 + Ledoit-Wolf 수축; $\Omega\propto 1/\text{DRI}^2$ 및 이상도 곱수 $(1+\gamma_{\text{anom}}\,a)$; $\Pi=\lambda\Sigma w_{mkt}$; 3축 결합 가중 $a=(0.412,0.412,0.176)$ |
 | `bl.optimize` | 사후 기대수익 $E[R]$, 최적 가중 $w^*$ 산출. | BL 입력 행렬 | `bl_result.parquet` (`E[R]`, `w_star`) | 볼록 QP는 `cvxpy`(OSQP/ECOS) 기본, 비볼록 비율형(Sharpe/IR)은 `scipy.optimize`(SLSQP) 병행([03 BL §7.3](./03-bl-model-design.md)); 정상 범위 검증 |
 
 BL 핵심 수식(정칙형, precision form; 상세는 [BL 모델 설계 §6.1](./03-bl-model-design.md)):
@@ -430,7 +431,7 @@ black-litterman/
         anomaly.py               #  IsolationForest
         validation.py            #  walk-forward, 시점 분리
       engine/                    # BL 엔진
-        inputs.py                #  P·Q(4축)·Ω·Σ·w_mkt·w_current
+        inputs.py                #  P·Q(3축)·Ω(+anomaly 변조)·Σ·w_mkt·w_current
         covariance.py            #  FULL 공분산 + Ledoit-Wolf
         optimize.py              #  사후수익·최적가중(cvxpy/SLSQP)
       serve/                     # 서빙·마트
@@ -553,7 +554,7 @@ sequenceDiagram
   F->>S: features.parquet (시점 분리)
   S->>M: features.parquet (train/valid/test)
   M->>S: ml_predictions.parquet (as_of_date)
-  S->>B: 예측(pattern/anomaly)+감성(news)+post_data(relationship·w_current)+wallet → P·Q·Ω·Σ·w_mkt
+  S->>B: 예측(pattern→Q, anomaly→Ω)+감성(news)+post_data(relationship·w_current)+wallet → P·Q·Ω·Σ·w_mkt
   B->>S: bl_result.parquet (E[R], w*)
   S->>V: 마트 + 외부 JSON
   V-->>V: Quarto(index.qmd) 렌더 → GitHub Pages
@@ -603,7 +604,7 @@ erDiagram
 |---|---|
 | 레이어 경계·의존방향·패키지 레이아웃·임포트 경로·`BL_` 설정키 | (본 문서가 권위 소스) |
 | 수집/적재 스키마·멱등 upsert·ASOF JOIN·`post_data`·외부API 백오프/데드레터 상세 | [02 데이터 파이프라인](./02-data-pipeline.md) |
-| P·Q(4축)·Ω·Σ·$w_{mkt}$ 구성, FULL 공분산/팩터구조, 사후수익 수식·검증 | [03 BL 모델 설계](./03-bl-model-design.md) |
+| P·Q(3축)·Ω(+anomaly 변조)·Σ·$w_{mkt}$ 구성, FULL 공분산/팩터구조, 사후수익 수식·검증 | [03 BL 모델 설계](./03-bl-model-design.md) |
 | `xp` 백엔드 디스패치, GPU/CPU 동치성(상대오차<1e-8), 선형대수 가속 | [04 연산 설계](./04-compute-design.md) |
 | 파라미터화 Quarto, 데이터/HTML 분리, 빌드 크기 상한 | [05 대시보드 설계](./05-dashboard-design.md) |
 | 핵심 의사결정 근거(연산 백엔드/저장/식별자/누수) | [ADR-0001~0004](./adr/ADR-0001-compute-backend.md) |
@@ -641,7 +642,7 @@ erDiagram
 
 격상 과정에서 다음 강점은 그대로 계승한다.
 
-- **BL 뷰 4축 앙상블**(news·pattern·anomaly·relationship) — AI 모델 3종 신호 + `post_data` 거래관계를 4축으로 결합(§1.3, [03 BL §5.1](./03-bl-model-design.md))
+- **BL 뷰 3축 앙상블**(news·pattern·relationship) — AI 모델 신호 + `post_data` 거래관계를 3축으로 결합하고, anomaly는 $\Omega$ 신뢰도 변조 요인으로 분리(§1.3, [03 BL §5.1/§5.4](./03-bl-model-design.md))
 - $\Omega \propto 1/\text{DRI}^2$ (데이터 빈약 고객 뷰 불신, BL Ω 의미론 정합)
 - DuckDB 네이티브 처리(ASOF JOIN, 멱등 upsert)
 - 이중적재 lineage(`RAW_FINANCIAL` + `FINANCIAL_WIDE`)

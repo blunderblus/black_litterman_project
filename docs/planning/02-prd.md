@@ -208,8 +208,8 @@ flowchart LR
 | FR-05.1 | $\Sigma$ 는 **잔액증가율(log-return)** 의 **FULL 공분산** + Ledoit-Wolf 수축으로 산출(대각만 사용 금지). 고유값바닥 $\lambda_{\text{floor}}=10^{-8}\cdot\mathrm{tr}\Sigma/N$ 와 조건수 상한 $\kappa_{\max}=10^{6}$ 적용(`reg=1e-6` 하드 바닥 폐기). 0·극소 잔액 계좌는 수익률 패널에서 분리 처리(BL설계 §2.2). |
 | FR-05.2 | $w_{mkt}$ 는 고객 예금(지갑) 규모 기반 비중: 재무보유 고객은 `FINANCIAL_WIDE.cash_amount`, 비재무 고객은 섹터중앙값 배수 추정(BL설계 §4.1을 권위 정의로 따름). |
 | FR-05.3 | $\Pi$ 는 $w_{mkt}$ 에 앵커: $\Pi = \lambda \Sigma w_{mkt}$ ($w_{hybrid}$ 앵커 금지). $\lambda$ 는 캘리브레이션(시작 2.5, 클립 $[1,5]$). |
-| FR-05.4 | $P$ 행렬을 절대뷰/상대뷰로 명시 구성하고 $Q$ 와 정합. 축가중 $a=(0.35\,\text{news},\,0.35\,\text{pattern},\,0.15\,\text{anomaly},\,0.15\,\text{relationship})$, 합=1. |
-| FR-05.5 | $\Omega$ 는 $\Omega \propto 1/\mathrm{DRI}^2$ (데이터신뢰도)와 모델 confidence를 결합. 뷰·$\Omega$·$\tau\Sigma$ 단위 통일. $\tau=0.05$(민감도 $\{0.025, 0.05, 0.1\}$). |
+| FR-05.4 | $P$ 행렬을 절대뷰/상대뷰로 명시 구성하고 $Q$ 와 정합. 뷰 3축 가중 $a=(0.412\,\text{news},\,0.412\,\text{pattern},\,0.176\,\text{relationship})$, 합=1(과거 4축에서 anomaly 제외 후 비율보존 재정규화). anomaly는 뷰가 아니라 $\Omega$ 신뢰도 변조 요인(FR-05.5). |
+| FR-05.5 | $\Omega$ 는 $\Omega \propto 1/\mathrm{DRI}^2$ (데이터신뢰도)·모델 confidence·anomaly 변조 $(1+\gamma_{\text{anom}}\,a)$ 를 결합($a=$`anomaly_score_raw`$\in[0,1]$ 이상 크기, $\gamma_{\text{anom}}=2.0$). anomaly↑ → $\Omega$↑ → 해당 기업 뷰가 사전(앵커)으로 후퇴(콜드스타트). 뷰·$\Omega$·$\tau\Sigma$ 단위 통일. $\tau=0.05$(민감도 $\{0.025, 0.05, 0.1\}$). |
 
 **사후수익 식(정칙형 / precision form, BL설계 §6.1과 동일):**
 $$
@@ -224,7 +224,7 @@ $$
 - [ ] $\Sigma$ 는 대칭·양의 준정부호이며 조건수 $\kappa(\Sigma)\le 10^{6}$, 고유값바닥 $\lambda_{\text{floor}}=10^{-8}\cdot\mathrm{tr}\Sigma/N$ 가 적용된다(수축 후).
 - [ ] $Q$ 와 $\Omega$ 의 단위가 동일 스케일(수익률² 차원)임을 정합성 테스트로 검증한다(과거 $Q\approx0.01$ vs $\Omega\approx17$ 부정합 재발 방지).
 - [ ] $\Pi$ 가 $w_{mkt}$ 로부터 역산($\Pi=\lambda\Sigma w_{mkt}$)되고, $\lambda\in[1,5]$ 클립이 적용됨을 검증한다.
-- [ ] 축가중 합 = 1 이며 기본값 $(0.35, 0.35, 0.15, 0.15)$ 가 적용된다.
+- [ ] 뷰 3축 가중 합 = 1 이며 기본값 $(0.412, 0.412, 0.176)$(news/pattern/relationship)가 적용된다. anomaly는 뷰가 아니라 $\Omega$ 신뢰도 변조 요인 $(1+\gamma_{\text{anom}}\,a),\ \gamma_{\text{anom}}=2.0$ 으로 적용됨을 검증한다.
 - [ ] $\tau$ 민감도 $\{0.025, 0.05, 0.1\}$ 결과가 보고된다(기본 $\tau=0.05$).
 - [ ] 데이터가 빈약한 기업(낮은 DRI)은 큰 $\Omega$ 로 인해 뷰 영향이 작음을 수치로 확인한다.
 - [ ] 0·극소 잔액(bal=0) 계좌가 수익률 패널에서 분리되어 가짜 만점(score 100) 결함이 재발하지 않음을 확인한다.
@@ -241,7 +241,7 @@ $$
 | FR-06.2 | 배열 백엔드 디스패치(GPU=CuPy / CPU=NumPy·SciPy), **동일 로직·동일 수치**(`xp = cupy if gpu else numpy`, float64). |
 | FR-06.3 | shrinkage·조건수 관리로 사후수익 폭주 해소(과거 `reg=1e-6` 하드 바닥 → $E[R]$ max 1.29 결함 제거). |
 
-**확정 파라미터(BL설계 §11 단일 출처):** $w_{\max}=0.10$, $\tau=0.05$(민감도 $\{0.025,0.05,0.1\}$), $\lambda$ 클립 $[1,5]$, $\lambda_{\text{floor}}=10^{-8}\cdot\mathrm{tr}\Sigma/N$, $\kappa_{\max}=10^{6}$, 축가중 $(0.35,0.35,0.15,0.15)$.
+**확정 파라미터(BL설계 §11 단일 출처):** $w_{\max}=0.10$, $\tau=0.05$(민감도 $\{0.025,0.05,0.1\}$), $\lambda$ 클립 $[1,5]$, $\lambda_{\text{floor}}=10^{-8}\cdot\mathrm{tr}\Sigma/N$, $\kappa_{\max}=10^{6}$, 뷰 3축 가중 $(0.412,0.412,0.176)$, anomaly $\Omega$ 게인 $\gamma_{\text{anom}}=2.0$.
 
 **수용기준(AC):**
 - [ ] $w^{*}$ 는 $\sum w=1$, $w\ge 0$, 자산별 상한 $w_i\le w_{\max}=0.10$, 정의된 티어/섹터 상한 제약을 모두 만족한다.
@@ -256,10 +256,10 @@ $$
 
 | ID | 우선순위 | 요구사항 |
 |---|---|---|
-| **FR-07** | **Should** | 기업별 스코어카드를 생성한다: 4축 뷰(news·pattern·anomaly·relationship), DRI, 사후수익 $E[R]$, 권장가중 $w^{*}$, 티어/섹터, 자사 보유 여부. |
+| **FR-07** | **Should** | 기업별 스코어카드를 생성한다: 모델 의견(news·pattern·relationship 뷰 3축 + anomaly는 $\Omega$ 신뢰도 변조 요인, 표시 라벨 "이상도(신뢰도 차감)"), DRI, 사후수익 $E[R]$, 권장가중 $w^{*}$, 티어/섹터, 자사 보유 여부. |
 
 **수용기준(AC):**
-- [ ] 한 화면에서 한 기업의 4축 신호·신뢰도·권장액션 입력값이 보인다.
+- [ ] 한 화면에서 한 기업의 모델 의견 신호(뷰 3축 + anomaly 신뢰도 차감)·신뢰도·권장액션 입력값이 보인다.
 - [ ] 각 점수에 "기준시점(base_ym)"과 데이터 출처가 표기된다.
 - [ ] DRI가 낮은 기업은 명시적 "낮은 신뢰도" 배지로 구분된다(US-07).
 

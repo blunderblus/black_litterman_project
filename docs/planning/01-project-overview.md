@@ -47,7 +47,7 @@
 ### 2.2 미션 (Mission)
 
 - 파편화된 재무·매크로·뉴스 데이터를 단일 고객 뷰로 통합한다.
-- 4축 신호 앙상블(뉴스감성·성장/이탈 패턴·이상탐지·거래관계 강도)을 BL의 "투자자 전망(View)"으로 정량화한다.
+- 3축 신호 앙상블(뉴스감성·성장/이탈 패턴·거래관계 강도)을 BL의 "투자자 전망(View)"으로 정량화하고, 이상탐지(anomaly)는 별도로 전망 신뢰도($\Omega$)를 변조한다.
 - 한정된 영업자원의 **최적 배분안(고객별 권장 가중치)** 을 비기술직 마케터/RM이 즉시 이해하고 실행할 수 있게 제공한다.
 - 모든 산출을 **검증 가능·재현 가능·시점 정합**하게 만든다(데이터 누수 없는 학습, 멱등 파이프라인).
 
@@ -65,7 +65,7 @@
 
 ### 3.1 핵심 아이디어
 
-법인 고객사를 "자산(asset)"으로 본다. 각 고객의 예금유치/유지 가치를 "기대수익률"로, 고객의 지갑(예금) 규모를 "시장 균형 비중"으로 둔다. 그 위에 **4축 신호 앙상블(news · pattern · anomaly · relationship)** 을 "투자자 전망(View)"으로 얹고, 각 전망의 신뢰도를 "전망 불확실성(Ω)"으로 둔다. BL 공식이 이를 결합해 **사후 기대수익(posterior)** 과 **최적 가중치(권장 자원 배분)** 를 산출한다.
+법인 고객사를 "자산(asset)"으로 본다. 각 고객의 예금유치/유지 가치를 "기대수익률"로, 고객의 지갑(예금) 규모를 "시장 균형 비중"으로 둔다. 그 위에 **3축 신호 앙상블(news · pattern · relationship)** 을 "투자자 전망(View)"으로 얹고(anomaly는 전망이 아니라 신뢰도 변조 요인), 각 전망의 신뢰도를 "전망 불확실성(Ω)"으로 둔다(anomaly 이상도가 Ω를 팽창). BL 공식이 이를 결합해 **사후 기대수익(posterior)** 과 **최적 가중치(권장 자원 배분)** 를 산출한다.
 
 블랙-리터만 사후 기대수익은 다음과 같이 정의된다(정칙형, precision form).
 
@@ -97,24 +97,24 @@ $$
 | 시장 균형 가중치 | $w_{mkt}$ | 고객 예금(지갑) 규모 기반 비중 | 잔액 규모 정규화 비중 |
 | 균형 내재수익 | $\Pi$ | 균형비중 $w_{mkt}$ 를 역산해 얻은 사전(prior) 기준선 (시장균형이 함의하는 기준 기대수익) | $\Pi = \lambda\Sigma w_{mkt}$ |
 | 공분산 | $\Sigma$ | 고객 간 잔액 동조성/리스크 | 잔액증가율 log-return FULL 공분산 + Ledoit-Wolf |
-| 투자자 전망 | $Q$ | 4축 신호 앙상블(news · pattern · anomaly · relationship) | XGBoost(성장/이탈), IsolationForest(이상), Gemini(뉴스감성), 거래관계 점수 |
+| 투자자 전망 | $Q$ | 3축 신호 앙상블(news · pattern · relationship) | XGBoost(성장/이탈), Gemini(뉴스감성), 거래관계 점수 |
 | 전망 매핑 | $P$ | 어느 고객(들)에 대한 전망인가 | 절대뷰/상대뷰 행렬 |
-| 전망 불확실성 | $\Omega$ | 신호를 얼마나 믿는가 | 데이터신뢰도(DRI) + 모델 confidence, $\Omega \propto 1/DRI^2$ |
+| 전망 불확실성 | $\Omega$ | 신호를 얼마나 믿는가 | 데이터신뢰도(DRI) + 모델 confidence + 이상도(anomaly $\gamma_{\text{anom}}$ 변조), $\Omega \propto 1/DRI^2$ |
 | 최적 가중치 | $w^{*}$ | **권장 영업자원 배분** | cvxpy QP 해 (제약 하 최적화) |
 
-### 3.3 뷰의 원천: 4축 신호 앙상블 (투자자 전망 Q의 구성)
+### 3.3 뷰의 원천: 3축 신호 앙상블 (투자자 전망 Q의 구성, +anomaly Ω 요인)
 
-투자자 전망 $Q$ 는 4개 축을 가중 합성한 `Q_final`로 구성된다. 축 가중은 $a=(0.35\,\text{news}, 0.35\,\text{pattern}, 0.15\,\text{anomaly}, 0.15\,\text{relationship})$, 합=1이다. 이 중 3개 축(news·pattern·anomaly)은 AI 모델 출력에서, relationship 축은 거래 메타데이터에서 파생되는 점수다(과거에 "AI 3종 신호"로 불린 것은 이 AI 모델 3종만 가리킨 표현이며, BL 입력 관점에서는 relationship을 포함한 4축이 정확하다).
+투자자 전망 $Q$ 는 3개 축을 가중 합성한 `Q_final`로 구성된다. 축 가중은 $a=(0.412\,\text{news}, 0.412\,\text{pattern}, 0.176\,\text{relationship})$, 합=1이다(과거 4축 $(0.35,0.35,0.15,0.15)$ 에서 anomaly를 제외하고 남은 3축을 비율보존 재정규화: $(0.35,0.35,0.15)/0.85\approx(0.412,0.412,0.176)$). 이 중 news·pattern 2개 축은 AI 모델 출력에서, relationship 축은 거래 메타데이터에서 파생되는 점수다. 이상탐지(anomaly)는 더 이상 방향 뷰(4번째 Q 축)가 아니며, 전망 불확실성 $\Omega$ 를 변조하는 신뢰도 요인이다(아래 표 및 §5.4 [BL 모델 설계](../design/03-bl-model-design.md) 참조; E2 교정).
 
 | 축 | 출처/모델 | 의미 | BL 매핑 | 가중 |
 |---|---|---|---|---|
-| news | Gemini 2.5 Flash-Lite(뉴스감성) | 법인 관련 뉴스의 긍/부정 | 절대/상대뷰 $Q$ 기여 | 0.35 |
-| pattern | XGBoost 분류 | 향후 잔액 성장(−)이탈 확률 차 | 절대뷰 $Q$ 기여 (부호 = 성장/이탈) | 0.35 |
-| anomaly | Isolation Forest × 자금흐름 방향 | 방향성 이상 신호 | 절대뷰 $Q$ 기여 (부호 = 자금흐름 방향, $\text{anomaly\_score} \times \mathrm{sign}(trx\_in - trx\_out)$) | 0.15 |
-| relationship | 거래관계 강도(파생 점수) | 계좌수·급여이체·주거래 등 결속도 | 절대뷰 $Q$ 기여 (+결속) | 0.15 |
+| news | Gemini 2.5 Flash-Lite(뉴스감성) | 법인 관련 뉴스의 긍/부정 | 절대/상대뷰 $Q$ 기여 | 0.412 |
+| pattern | XGBoost 분류 | 향후 잔액 성장(−)이탈 확률 차 | 절대뷰 $Q$ 기여 (부호 = 성장/이탈) | 0.412 |
+| relationship | 거래관계 강도(파생 점수) | 계좌수·급여이체·주거래 등 결속도 | 절대뷰 $Q$ 기여 (+결속) | 0.176 |
+| anomaly *(뷰 아님)* | Isolation Forest | 부호 없는 *이상 크기*(in-distribution 여부) `anomaly_score_raw`$\in[0,1]$ | $Q$에 기여하지 않음 — $\Omega$ 신뢰도 변조 곱수 $(1+\gamma_{\text{anom}}\,a)$, $\gamma_{\text{anom}}=2.0$ (§5.4) | — |
 
 - **출처 컬럼 계보**: news 축의 원천 점수는 `gemini_score`(=감성 enrich 산출 테이블 `COMPANY_SENTIMENT.sentiment_score`의 별칭/파생; 대시보드 마트에서는 `news_sentiment`/`view_news`로 표기)이며, relationship 축은 `relationship_score`(계좌수·급여이체·주거래)다. 단일 계보 정의는 [데이터 파이프라인](../design/02-data-pipeline.md)을 권위 소스로 한다.
-- **공통 메커니즘 — confidence → Ω**: 위 4축은 모두 $Q$(전망 값) 기여 항이다. 각 신호의 신뢰도는 별도로 데이터신뢰도(DRI)와 모델 confidence를 통해 **전망 불확실성 $\Omega$** 로 반영된다($\Omega \propto 1/DRI^2$, 캘리브레이션된 confidence). 즉 anomaly score 자체는 $Q$ 축이며, "Ω 조정"은 anomaly와 무관한 공통 confidence/DRI 경로다. 상세는 [BL 모델 설계 §5](../design/03-bl-model-design.md).
+- **공통 메커니즘 — confidence → Ω**: 위 3축(news·pattern·relationship)은 모두 $Q$(전망 값) 기여 항이다. 각 신호의 신뢰도는 별도로 데이터신뢰도(DRI)와 모델 confidence를 통해 **전망 불확실성 $\Omega$** 로 반영된다($\Omega \propto 1/DRI^2$, 캘리브레이션된 confidence). **anomaly는 $Q$ 축이 아니라 이 $\Omega$ 신뢰도 변조 요인이다(DRI·confidence의 형제)**: 부호 없는 이상 크기 $a=$`anomaly_score_raw`$\in[0,1]$ 가 $\Omega$ 에 곱수 $(1+\gamma_{\text{anom}}\,a)$($\gamma_{\text{anom}}=2.0$)로 작용해, 이상할수록 $\Omega$↑ → 그 법인 뷰가 prior(앵커)로 후퇴한다(cold-start 후퇴). 과거에 anomaly에 자금흐름 부호를 곱해 4번째 방향 뷰로 쓰던 설계는 pattern 축과 흐름부호를 중복 계상하므로 폐기했다(E2 교정). 상세는 [BL 모델 설계 §5](../design/03-bl-model-design.md).
 
 세분화 축은 다음과 같다.
 
@@ -307,7 +307,7 @@ flowchart TD
 
 격상 과정에서 토이 단계의 다음 강점은 보존·강화한다.
 
-- 4축 뷰 앙상블(news · pattern · anomaly · relationship), 축 가중 $a=(0.35, 0.35, 0.15, 0.15)$
+- 3축 뷰 앙상블(news · pattern · relationship), 축 가중 $a=(0.412, 0.412, 0.176)$ (+anomaly는 $\Omega$ 신뢰도 변조 요인으로 계승)
 - $\Omega \propto 1/DRI^2$: 데이터 빈약 고객의 뷰를 불신하는 BL Ω 의미론 정합
 - DuckDB 네이티브 처리(ASOF JOIN · 멱등 upsert)
 - 이중적재 lineage(RAW_FINANCIAL + FINANCIAL_WIDE)

@@ -1,8 +1,8 @@
 """이상탐지 — IsolationForest. anomaly_score_raw ∈ [0,1] (train-fit 고정 경계로 정규화).
 
 설계 §6, ADR-0004. 과거 토이 결함 교정: 추론 배치 min/max 정규화 누수 폐기 →
-train 적합 시점의 score 분포 경계를 저장해 추론에 동일 적용. 방향 부호는 BL 입력 단계에서
-trx_in−trx_out 과 결합한다(여기서는 크기[0,1]만 산출).
+train 적합 시점의 score 분포 경계를 저장해 추론에 동일 적용. 크기[0,1]만 산출하며 방향은
+결합하지 않는다 — 이 이상도는 BL 입력 단계에서 Ω 신뢰도 변조 요인으로 쓰인다(engine.inputs, §5.4).
 """
 
 from __future__ import annotations

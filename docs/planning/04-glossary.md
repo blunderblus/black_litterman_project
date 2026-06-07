@@ -18,7 +18,7 @@
 
 본 문서는 "AI 기반 BL(Black-Litterman) 법인 마케팅 최적화 시스템"에서 사용하는 모든 핵심 용어를 정의한다. 금융공학 이론 용어, 마케팅 도메인 용어, 데이터 식별자, 세분화 축(Tier/Track), 데이터 자산(테이블·마트), 핵심 파라미터, 기술 스택을 망라하며, 각 항목은 1~3문장으로 정의한다. 전문용어는 한글(영문)을 병기한다. 성능 수치는 아직 미검증이므로 본 문서에서 단정하지 않으며, 과거 토이 프로젝트에서 보고된 수치는 "추정/미검증"으로 표기한다.
 
-> 참고: 이 시스템의 모든 정의는 다음 핵심 은유 매핑 위에 서 있다 — **자산(asset) = 법인 고객사**, **기대수익률 = 예금유치·유지 가치(CLV proxy)**, **시장 균형 가중치 = 고객 지갑(예금) 규모 비중**, **투자자 전망(View) = 4축 AI 뷰 앙상블(news/pattern/anomaly/relationship)**, **전망 불확실성 = 데이터신뢰도(DRI) + 모델 confidence**.
+> 참고: 이 시스템의 모든 정의는 다음 핵심 은유 매핑 위에 서 있다 — **자산(asset) = 법인 고객사**, **기대수익률 = 예금유치·유지 가치(CLV proxy)**, **시장 균형 가중치 = 고객 지갑(예금) 규모 비중**, **투자자 전망(View) = 뷰 3축 AI 앙상블(news/pattern/relationship)**, **전망 불확실성 = 데이터신뢰도(DRI) + 모델 confidence + 이상도(anomaly Ω 요인)**.
 
 > 단위/표기 권위: 수식·기호·확정 파라미터의 단일 출처(single source of truth)는 [BL 모델 설계서](../design/03-bl-model-design.md)이며, 테이블·컬럼·식별자 스키마의 권위 소스는 [데이터 파이프라인 설계서](../design/02-data-pipeline.md)다. 본 용어집은 그 정의를 요약·연결한다.
 
@@ -83,13 +83,14 @@ $$
 | 평균-분산 최적화 (Mean-Variance Optimization) | MVO | 마코위츠(Markowitz)의 포트폴리오 이론으로, 기대수익률과 공분산만으로 효율적 프론티어를 구하는 방법. 무제약/등식제약 해 $w^{*}=\frac{1}{\lambda}\Sigma^{-1}\mu$는 입력값(특히 기대수익률)에 극도로 민감해 코너 해(특정 자산 쏠림)·음수가중을 내는 결함이 있으며, BL은 이를 보완한다. |
 | 자본자산가격결정모형 (Capital Asset Pricing Model) | CAPM | 시장 균형에서 자산의 기대수익률이 시장 베타에 선형 비례한다는 이론. BL의 "역최적화(reverse optimization)"로 시장가중에서 $\Pi$를 역산하는 사전분포의 이론적 근거를 제공한다. |
 | 사전분포 (Prior distribution) | — | 투자자 전망을 반영하기 전, 시장 균형만으로 정의되는 기대수익률 분포 $\mathcal{N}(\Pi, \tau\Sigma)$. BL에서는 "AI 신호를 보기 전, 지갑규모 균형에서 본 고객 기본 가치". |
-| 사후분포 (Posterior distribution) | — | 사전분포에 전망(View)을 결합한 후의 기대수익률 분포로, BL 공식의 산출물 $E[R]$과 사후공분산 $\Sigma_{post}=\Sigma+M$. BL에서는 "4축 AI 뷰 앙상블을 반영한 보정 고객 가치"이며, 제약 최적화의 입력이다. |
+| 사후분포 (Posterior distribution) | — | 사전분포에 전망(View)을 결합한 후의 기대수익률 분포로, BL 공식의 산출물 $E[R]$과 사후공분산 $\Sigma_{post}=\Sigma+M$. BL에서는 "뷰 3축 AI 앙상블을 반영한 보정 고객 가치"이며, 제약 최적화의 입력이다. |
 | 내재균형수익률 (Implied Equilibrium Returns) | $\Pi$ | 시장가중 $w_{mkt}$를 역최적화해 얻는 균형 기대수익률 벡터, $\Pi = \lambda\Sigma w_{mkt}$. 과거 토이판은 $\Pi$를 $w_{hybrid}(=0.7 w_{current}+0.3 w_{mkt})$에 앵커했으나, 격상판은 반드시 지갑규모 기반 $w_{mkt}$에 앵커한다($w_{hybrid}$는 최적화 초기값·턴오버 기준으로만 사용). |
 | 시장가중 (Market weights) | $w_{mkt}$ | 균형 포트폴리오의 자산별 비중으로, BL에서는 각 법인의 **지갑(예금) 규모 / 전체 지갑 합** 비중. `FINANCIAL_WIDE.cash_amount`(현금성자산+단기예금 합산)를 지갑 프록시로 산정한다(매크로가 직접 보정하지 않음). |
 | 전망 선택행렬 (Pick / Picking matrix) | $P$ | 어떤 자산(고객)에 대해 어떤 전망을 거는지를 나타내는 $K \times N$ 행렬($K$=뷰 개수). 절대뷰(특정 고객의 가치 상승)는 해당 열에 1, 상대뷰(고객/섹터 A가 B보다 우수)는 행 가중치 합=0으로 구성하며, 과거 토이판이 $P$를 미사용($P=I$ 암묵)한 결함을 명시적으로 해소한다. |
-| 전망값 (View vector) | $Q$ | 각 전망의 기대 크기 벡터(예: "이 고객 가치가 +x% 높다"). BL에서는 **4축 AI 뷰 앙상블**($Q_{final}=a^{\top}\tilde s$, news/pattern/anomaly/relationship)을 결합해 산출하며, $\Sigma$·$\tau\Sigma$와 **단위(수익률² 차원)를 통일**한다(과거 $Q\approx0.01$ vs $\Omega\approx17$ 부정합 교정). |
-| 축 가중 (Axis weights) | $a$ | 4축 AI 뷰를 $Q$로 결합하는 가중 벡터 $a=(0.35\ \text{news},\ 0.35\ \text{pattern},\ 0.15\ \text{anomaly},\ 0.15\ \text{relationship})$, 합=1. pattern·news를 주신호로 둔다([BL 모델 설계서 §5.2·§11](../design/03-bl-model-design.md)). |
-| 전망 불확실성 (View uncertainty) | $\Omega$ | 각 전망의 신뢰도를 나타내는 **대각** 공분산 행렬로, 값이 클수록 해당 뷰를 덜 신뢰한다. 단위정합 기준항을 곱한 형태 $\Omega_{kk} = (P\,\tau\Sigma\,P^{\top})_{kk}\times \frac{1}{\text{DRI}_i^2}\times \frac{1-\text{conf}_i}{c_{cal}}$로 둔다. 단위정합 기준항 $(P\tau\Sigma P^{\top})_{kk}$(Idzorek식)이 $Q$·$\Omega$·$\tau\Sigma$를 같은 차원으로 맞춰 과거 부정합을 원천 해소하며, $\Omega\propto 1/\text{DRI}^2$ 의미론으로 데이터 빈약 고객의 뷰를 자동 불신한다([BL 모델 설계서 §5.4](../design/03-bl-model-design.md)). |
+| 전망값 (View vector) | $Q$ | 각 전망의 기대 크기 벡터(예: "이 고객 가치가 +x% 높다"). BL에서는 **뷰 3축 AI 앙상블**($Q_{final}=a^{\top}\tilde s$, news/pattern/relationship)을 결합해 산출하며, $\Sigma$·$\tau\Sigma$와 **단위(수익률² 차원)를 통일**한다(과거 $Q\approx0.01$ vs $\Omega\approx17$ 부정합 교정). anomaly는 방향 뷰가 아니라 $\Omega$ 신뢰도 요인이다(아래 $\Omega$ 항·§5.4). |
+| 축 가중 (Axis weights) | $a$ | 뷰 3축 AI 뷰를 $Q$로 결합하는 가중 벡터 $a=(0.412\ \text{news},\ 0.412\ \text{pattern},\ 0.176\ \text{relationship})$, 합=1. pattern·news를 주신호로 둔다(과거 4축 $(0.35,0.35,0.15,0.15)$에서 anomaly 제외 후 비율보존 재정규화 $(0.35,0.35,0.15)/0.85$; anomaly는 §5.4 $\Omega$ 요인으로 이전)([BL 모델 설계서 §5.2·§11](../design/03-bl-model-design.md)). |
+| 전망 불확실성 (View uncertainty) | $\Omega$ | 각 전망의 신뢰도를 나타내는 **대각** 공분산 행렬로, 값이 클수록 해당 뷰를 덜 신뢰한다. 단위정합 기준항에 무차원 신뢰도 보정을 곱한 형태 $\Omega_{kk} = (P\,\tau\Sigma\,P^{\top})_{kk}\times \frac{1}{\text{DRI}_i^2}\times \frac{1-\text{conf}_i}{c_{cal}}\times (1+\gamma_{\text{anom}}\,a_i)$로 둔다($a_i=$`anomaly_score_raw`$\in[0,1]$, $\gamma_{\text{anom}}=2.0$). 단위정합 기준항 $(P\tau\Sigma P^{\top})_{kk}$(Idzorek식)이 $Q$·$\Omega$·$\tau\Sigma$를 같은 차원으로 맞춰 과거 부정합을 원천 해소하며, $\Omega\propto 1/\text{DRI}^2$ 의미론으로 데이터 빈약 고객의 뷰를 자동 불신한다. 이상도 인자 $(1+\gamma_{\text{anom}}\,a_i)$는 이상할수록 $\Omega$를 팽창시켜 그 뷰를 prior(앵커)로 후퇴시키는 신뢰도 변조다(방향 뷰 아님; §5.4 E2 교정)([BL 모델 설계서 §5.4](../design/03-bl-model-design.md)). |
+| anomaly $\Omega$ 게인 (Anomaly Ω gain) | $\gamma_{\text{anom}}$ | $\Omega$의 이상도 신뢰 인자 $(1+\gamma_{\text{anom}}\,a_i)$의 게인 상수, **기본값 $\gamma_{\text{anom}}=2.0$**(가설; §9.3 reliability·`eval.calibrate.calibrate_gamma_anom`이 실현 적중률로 역산). $a_i=$IsolationForest `anomaly_score_raw`$\in[0,1]$가 클수록 곱수가 $[1,\,1+\gamma_{\text{anom}}]$로 유계 증가해 그 뷰를 prior로 후퇴시킨다(턴오버 패널티 $\gamma$와 별개 기호). 과거 anomaly를 4번째 방향 뷰로 쓰던 설계는 폐기(§5.1 E2 교정, [BL 모델 설계서 §5.4·§11](../design/03-bl-model-design.md)). |
 | 스케일 파라미터 (Tau) | $\tau$ | 사전분포의 불확실성 척도로, 균형수익률을 얼마나 신뢰하는지를 조절하는 작은 상수. **기본값 $\tau=0.05$**, 민감도 분석은 격자 $\{0.025, 0.05, 0.1\}$로 점검한다. $\tau\Sigma$ 단위가 $Q$·$\Omega$와 정합되도록 설계한다. |
 | 위험회피계수 (Risk aversion) | $\lambda$ | 역최적화($\Pi=\lambda\Sigma w_{mkt}$)와 제약 QP의 위험항에 등장하는 위험-수익 트레이드오프 상수. $\lambda=(E[r_{mkt}]-r_f)/\sigma_{mkt}^2$로 캘리브레이션하며(시작 기본값 2.5, 클립 $[1,5]$, $r_f$=ECOS 금리), 영업자원 집중도(공격적/보수적 배분)를 조절한다. |
 | 공분산 행렬 (Covariance matrix) | $\Sigma$ | 자산(고객) 간 수익률 동조성을 담는 $N \times N$ 행렬. BL은 **잔액증가율(log-return) 공분산**으로 재정의하며(과거 "잔액 변동계수²" 오용 교정), 대각만 쓰던 토이판과 달리 **FULL 공분산**으로 분산효과를 복원한다. |
@@ -103,7 +104,7 @@ $$
 | 샤프 비율 (Sharpe Ratio) | — | 무위험 대비 초과수익을 변동성으로 나눈 위험조정 성과 지표. BL에서는 포트폴리오 수준 영업 효율성(투입 자원 대비 위험조정 유치가치)을 평가하는 데 사용한다. |
 | 정보 비율 (Information Ratio) | IR | 벤치마크($w_b=w_{current}$) 대비 초과수익을 추적오차로 나눈 지표로, 액티브 전략(AI 뷰 반영 배분)이 기준(현행 배분)을 얼마나 일관되게 능가하는지를 측정한다. 워크-포워드 백테스트의 핵심 평가 지표 중 하나다. |
 
-> 핵심 파라미터 미니표(확정 기본값, 출처 [BL 모델 설계서 §11](../design/03-bl-model-design.md)): $\tau=0.05$(민감도 {0.025,0.05,0.1}), $\lambda$=캘리브레이션(시작 2.5, 클립[1,5]), $\delta$=Ledoit-Wolf 자동, $\lambda_{floor}=10^{-8}\,\text{tr}\Sigma/N$, $\kappa_{\max}=10^{6}$, $a=(0.35,0.35,0.15,0.15)$, $w_{\max}=0.10$, funding_gap 계수 $f$=0.10/0.05/0.02(PRIME/CORE/WATCH), 솔버=cvxpy(OSQP/ECOS)·SLSQP.
+> 핵심 파라미터 미니표(확정 기본값, 출처 [BL 모델 설계서 §11](../design/03-bl-model-design.md)): $\tau=0.05$(민감도 {0.025,0.05,0.1}), $\lambda$=캘리브레이션(시작 2.5, 클립[1,5]), $\delta$=Ledoit-Wolf 자동, $\lambda_{floor}=10^{-8}\,\text{tr}\Sigma/N$, $\kappa_{\max}=10^{6}$, $a=(0.412,0.412,0.176)$(news/pattern/relationship), $\gamma_{\text{anom}}=2.0$(anomaly $\Omega$ 게인), $w_{\max}=0.10$, funding_gap 계수 $f$=0.10/0.05/0.02(PRIME/CORE/WATCH), 솔버=cvxpy(OSQP/ECOS)·SLSQP.
 
 ---
 
@@ -112,7 +113,7 @@ $$
 | 용어 (한글/영문) | 정의 |
 |---|---|
 | 고객생애가치 (Customer Lifetime Value, CLV) | 한 법인 고객이 향후 거래 기간 동안 창출할 것으로 기대되는 순가치(예금유치·유지 가치)의 현재가 추정치. BL에서 BL의 "기대수익률"에 대응하는 핵심 목표 변수이며, 직접 라벨이 없으므로 **CLV proxy**(지갑·잔액 log-return 기반)로 근사한다. |
-| 거래관계 강도 (Relationship score) | 고객 법인과 자사의 결속도를 계좌수·급여이체·주거래 여부 등으로 정량화한 신호. 4축 AI 뷰 앙상블의 **relationship 축**(축가중 0.15)을 구성하며, 출처는 `post_data` 기반 `relationship_score`다(부호 +결속). |
+| 거래관계 강도 (Relationship score) | 고객 법인과 자사의 결속도를 계좌수·급여이체·주거래 여부 등으로 정량화한 신호. 뷰 3축 AI 앙상블의 **relationship 축**(축가중 0.176)을 구성하며, 출처는 `post_data` 기반 `relationship_score`다(부호 +결속). |
 | 외감 법인 (외부감사 대상, External-audit company) | 자산·매출 등 일정 요건을 충족해 외부감사를 받고 DART에 재무제표를 공시하는 법인. 재무 데이터 가용성이 높아 Tier 1(T1)으로 분류된다. |
 | 비외감 법인 (Non-external-audit company) | 외부감사 의무가 없어 재무 공시가 제한적인 중소·비상장 법인. 재무 데이터가 빈약해 대안 신호(뉴스·고용·수주)에 더 의존하며 Tier 2(T2)로 분류된다. |
 | 주거래 (Main bank relationship) | 고객 법인이 결제·자금관리의 중심으로 삼는 주거래 금융기관 관계. 주거래화는 자금 이동의 점착성(stickiness)을 높여 이탈을 방어하는 핵심 마케팅 목표이며, relationship 축의 입력(`is_main_bank`)이다. |
@@ -190,8 +191,8 @@ erDiagram
 | COMPANY_SENTIMENT | 가공 테이블 | 기업·기간 단위 뉴스 감성 집계. `TARGET_ID`, `base_ym`, `sentiment_score`(**감성 원천 컬럼**), `risk_score`, `event_cnt`, `confidence` 등. Gemini enrich 산출물. `sentiment_score`가 canonical 원천이며, 03 BL설계의 `gemini_score`·05 마트의 `news_sentiment`/`view_news`는 모두 그 별칭/파생이다. |
 | ML_PREDICTIONS | 가공 테이블 | XGBoost(성장/이탈)·Isolation Forest(이상) 예측 결과. `corp_code`(키), `as_of_date`, `biz_reg_no`(추적용, 결합키 아님), `prob_growth_raw`, `prob_churn_raw`, `anomaly_score_if`, `confidence` 등. 시점 분리 검증을 거친 출력만 적재. |
 | post_data | 분석 데이터셋 | 학습·전처리 통합 데이터셋(과거 07 대응). 재무·매크로·감성·거래관계(`relationship_score`, `account_count`, `has_payroll`, `is_main_bank`)·`bal`·`r_log`(log-return) 등을 시점 엄격 분리로 구성(look-ahead 차단). |
-| bl_input_data | BL 입력셋 | BL 최적화 직전 입력 묶음(과거 09 대응). 자산별 $w_{mkt}$, $Q_{final}$(4축), `DRI`, `confidence`, $w_{current}$, $w_{hybrid}$, 4축 원천(`prob_growth_raw`/`prob_churn_raw`/`gemini_score`/`relationship_score`) 등을 단위정합 상태로 보관. $\Sigma$(FULL+Ledoit-Wolf)·$P$·$\Omega$ 행렬은 사이드카 Parquet(`bl_sigma`/`bl_P`/`bl_omega`)에 저장. |
-| bl_dashboard_mart | 서빙 마트 | 대시보드·영업용 최종 마트(과거 10/11 대응). 핵심 컬럼: `corp_code`/`target_id`, `bl_return`($E[R]$), `current_weight`/`market_weight`/`target_weight`/`weight_diff`, `marketing_score`, `funding_gap`, `action_guide`, 4축 신호(`prob_growth_raw`/`prob_churn_raw`/`anomaly_score_raw`/`news_sentiment`/`sentiment_confidence`), Tier·DRI 등. 컬럼 권위 스키마는 [데이터 파이프라인 §3.2.3](../design/02-data-pipeline.md). |
+| bl_input_data | BL 입력셋 | BL 최적화 직전 입력 묶음(과거 09 대응). 자산별 $w_{mkt}$, $Q_{final}$(뷰 3축), `DRI`, `confidence`, $w_{current}$, $w_{hybrid}$, 뷰 3축 원천(`prob_growth_raw`/`prob_churn_raw`/`gemini_score`/`relationship_score`)과 $\Omega$ 이상도 요인(`anomaly_score_raw`) 등을 단위정합 상태로 보관. $\Sigma$(FULL+Ledoit-Wolf)·$P$·$\Omega$ 행렬은 사이드카 Parquet(`bl_sigma`/`bl_P`/`bl_omega`)에 저장. |
+| bl_dashboard_mart | 서빙 마트 | 대시보드·영업용 최종 마트(과거 10/11 대응). 핵심 컬럼: `corp_code`/`target_id`, `bl_return`($E[R]$), `current_weight`/`market_weight`/`target_weight`/`weight_diff`, `marketing_score`, `funding_gap`, `action_guide`, 모델 의견 신호(`prob_growth_raw`/`prob_churn_raw`/`anomaly_score_raw`/`news_sentiment`/`sentiment_confidence`; `anomaly_score_raw`는 $\Omega$ 신뢰도 변조 표시), Tier·DRI 등. 컬럼 권위 스키마는 [데이터 파이프라인 §3.2.3](../design/02-data-pipeline.md). |
 | dedup(중복 제거) | 처리 규약 | RAW_NEWS의 동일/유사 기사 병합 규칙. dedup 키는 `NEWS_HASH`(정규화 본문 해시) + 제목·발행일 유사도이며, **동일 기사 충돌 시 결정적 정렬키로 1건만 보존**한다. refine 단계에서 적용([데이터 파이프라인 §2.1](../design/02-data-pipeline.md)). |
 
 ```mermaid
@@ -222,7 +223,7 @@ flowchart LR
 | cvxpy | 볼록 최적화 모델링 라이브러리(백엔드 OSQP/ECOS). 최소분산·턴오버패널티 등 볼록 QP의 권장 솔버다(전역최적·안정). |
 | SLSQP | SciPy의 순차 2차계획 최적화기. 최대 Sharpe·IR 등 비볼록 비율형 목적에 사용하며, $w_{hybrid}$ 초기값+다중시작으로 안정화한다. |
 | XGBoost | 그래디언트 부스팅 트리 라이브러리. 법인 고객의 성장/이탈을 분류해 **pattern 축**(`prob_growth_raw − prob_churn_raw`) 뷰를 생성하며, 시점 분리 검증과 학습기준 고정 스케일러를 전제로 사용한다. |
-| Isolation Forest | scikit-learn의 트리 기반 이상탐지 알고리즘. 비정상적 거래·재무 패턴을 식별해 BL의 **anomaly 축** 뷰(`anomaly_score_raw × sign(trx_in−trx_out)`)를 생성한다. |
+| Isolation Forest | scikit-learn의 트리 기반 이상탐지 알고리즘. 비정상적 거래·재무 패턴의 **이상 크기**(`anomaly_score_raw` ∈[0,1], 부호 없는 in-distribution 여부)를 산출해 BL의 **$\Omega$ 이상도 신뢰 인자** $(1+\gamma_{\text{anom}}\,a_i)$를 생성한다(방향 뷰 아님). 과거 `anomaly_score_raw × sign(trx_in−trx_out)`로 4번째 방향 뷰를 만들던 설계는 pattern 축과 자금흐름 부호를 공유해 **중복 계상**하고 일회성 급변(M&A 대금·세금환급)을 강한 +뷰로 오독하므로 폐기했다(§5.1·§5.4 E2 교정). |
 | Gemini (2.5 Flash-Lite) | Google의 LLM. 수집 뉴스의 감성·리스크를 평가해 **news 축** 뷰(`sentiment_score`, 별칭 `gemini_score`)를 생성하며, confidence는 검증셋 기반으로 캘리브레이션한다(하드코딩 금지). |
 | Ledoit-Wolf | scikit-learn `sklearn.covariance.LedoitWolf`(GPU는 동일 공식 CuPy 구현). FULL 표본공분산의 최적 수축강도 $\delta$를 해석적으로 산정해 조건수를 안정화한다(§2 참조). |
 | Quarto | 파라미터화된 단일 소스 문서·대시보드 시스템. Plotly와 결합해 효율적 프론티어·기업 스코어카드를 렌더링하며, 데이터를 HTML에서 분리(외부 JSON/lazy-load)해 산출물 크기를 통제한다([대시보드 설계서](../design/05-dashboard-design.md)). |
@@ -257,7 +258,7 @@ flowchart LR
 
 ## 9. 표기 규약
 
-- 수식 기호·확정 파라미터의 단일 출처(single source of truth)는 [BL 모델 설계서](../design/03-bl-model-design.md)이며, 본 용어집 2장은 그 요약이다: $\Pi$, $\Sigma$, $\Sigma_{post}$, $\Omega$, $\tau$, $\lambda$, $\lambda_{floor}$, $\kappa_{\max}$, $P$, $Q$, $a$, $w_{mkt}$, $w_{\max}$, $E[R]$, $w^*$.
+- 수식 기호·확정 파라미터의 단일 출처(single source of truth)는 [BL 모델 설계서](../design/03-bl-model-design.md)이며, 본 용어집 2장은 그 요약이다: $\Pi$, $\Sigma$, $\Sigma_{post}$, $\Omega$, $\tau$, $\lambda$, $\lambda_{floor}$, $\kappa_{\max}$, $P$, $Q$, $a$, $\gamma_{\text{anom}}$, $w_{mkt}$, $w_{\max}$, $E[R]$, $w^*$.
 - 사후 $E[R]$ 표기는 **정칙형(precision form)** 을 단일 표준으로 한다(구현=정칙형+Cholesky solve). 시장균형 등가형 $E[R]=\Pi+\tau\Sigma P^{\top}(P\tau\Sigma P^{\top}+\Omega)^{-1}(Q-P\Pi)$는 대수적으로 동등한 등가표현일 뿐, 본 시스템의 표준 표기·구현은 정칙형이다.
 - 테이블·컬럼·식별자 스키마의 권위 소스는 [데이터 파이프라인 설계서 §3](../design/02-data-pipeline.md)다. 식별자는 영문 스네이크표기(`corp_code`, `biz_reg_no`, `jurir_no`, `stock_code`)로 통일하며 canonical key는 `corp_code`다.
 - 테이블·마트명은 대문자 스네이크(원천/가공)와 소문자 스네이크(분석/서빙)를 원본 자산 명칭 그대로 따른다. 동일 감성값의 계보는 `COMPANY_SENTIMENT.sentiment_score`(원천) → `gemini_score`(03 별칭) → `news_sentiment`/`view_news`(05 별칭)로 단일화한다.

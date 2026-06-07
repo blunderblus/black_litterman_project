@@ -61,21 +61,19 @@ def _returns_panel(
 
 
 def _view_scaler(assets: pd.DataFrame) -> dict:
-    """뷰 4축 raw 신호의 (mean,std) — build_views.axis_raw 와 동일 정의(단면 표준화 명시화).
+    """뷰 3축 raw 신호의 (mean,std) — build_views.axis_raw 와 동일 정의(단면 표준화 명시화).
 
     배치 z-score 폴백 경로(추론 누수 경고)를 제거하고, 단면 표준화를 의도된 스케일러로 주입한다.
+    anomaly 는 뷰 축이 아니라 Ω 신뢰도 변조 요인이므로 여기(뷰 스케일러)에 포함하지 않는다.
     """
     n = len(assets)
 
     def col(name: str) -> np.ndarray:
         return assets[name].fillna(0).to_numpy("float64") if name in assets.columns else np.zeros(n)
 
-    have_flow = "trx_in" in assets.columns and "trx_out" in assets.columns
-    flow = np.sign(col("trx_in") - col("trx_out")) if have_flow else 1.0
     axes = {
         "news": col("gemini_score"),
         "pattern": col("prob_growth_raw") - col("prob_churn_raw"),
-        "anomaly": col("anomaly_score_raw") * flow,
         "relationship": col("relationship_score"),
     }
     out: dict = {}
@@ -144,16 +142,18 @@ def run_from_frames(
     frames: dict, *, base_ym: int = DEFAULT_BASE_YM, seed: int = 42,
     render: bool = False, source: str = "frames",
     tau: float | None = None, axis_weights: dict | None = None, omega_scale: float = 1.0,
+    gamma_anom: float | None = None,
     ledger_path: str | None = None, run_ts: str | None = None,
 ) -> dict:
     """프레임(데모/실데이터/백테스트 공통) → 전체 BL 파이프라인 1회 실행(공개 진입점).
 
     렌더 없이(기본) mart 만 반환하므로 백테스트·오프라인 평가가 시점별로 반복 호출한다.
-    tau/axis_weights/omega_scale 은 BL 하이퍼파라미터 override(eval.calibrate 가 실현지표로 역산).
+    tau/axis_weights/omega_scale/gamma_anom 은 BL 하이퍼파라미터 override(eval.calibrate 가 역산).
     ledger_path 지정 시 권고를 append 원장에 적재한다(serve.ledger, 묶임줄 발행 기록).
     """
     result = _pipeline_from_frames(frames, base_ym=base_ym, seed=seed, render=render, source=source,
-                                   tau=tau, axis_weights=axis_weights, omega_scale=omega_scale)
+                                   tau=tau, axis_weights=axis_weights, omega_scale=omega_scale,
+                                   gamma_anom=gamma_anom)
     if ledger_path:
         _log_to_ledger(result, ledger_path, run_ts)
     return result
@@ -171,7 +171,7 @@ def _log_to_ledger(result: dict, ledger_path: str, run_ts: str | None) -> None:
 
 def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, top_n=200,
                           seed=42, render=True, source="live",
-                          tau=None, axis_weights=None, omega_scale=1.0) -> dict:
+                          tau=None, axis_weights=None, omega_scale=1.0, gamma_anom=None) -> dict:
     """프레임(데모/실데이터 공통) → features→models→BL→마트→대시보드. 동일 다운스트림."""
     # features → models
     feat = build_features_from_frames(
@@ -196,7 +196,8 @@ def _pipeline_from_frames(frames, *, out_dir="site", base_ym=DEFAULT_BASE_YM, to
 
     # BL 입력 → 사후수익 → 최적화 (뷰 스케일러 명시 주입: 배치 z-score 폴백 경로 제거)
     scaler = _view_scaler(assets)
-    bl_kwargs: dict = {"axis_weights": axis_weights, "omega_scale": omega_scale}
+    bl_kwargs: dict = {"axis_weights": axis_weights, "omega_scale": omega_scale,
+                       "gamma_anom": gamma_anom}
     if tau is not None:
         bl_kwargs["tau"] = tau
     inp = bi.assemble_bl_inputs(assets, panel, scaler=scaler, **bl_kwargs)

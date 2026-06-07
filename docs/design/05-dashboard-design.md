@@ -45,7 +45,7 @@ BL 대시보드는 BL 최적화 결과(`target_weight`, `bl_return`($E[R]$), `ma
 | 목적 | 설계 함의 |
 |---|---|
 | 한정 영업자원의 우선순위 제시 | `marketing_score` 내림차순 랭킹·리밸런스 바차트가 1차 화면 |
-| 권고의 "근거" 투명화 | 기업 스코어카드에 $\Pi$/$Q$/$\Omega$(BL 입력 사이드카, §5.4)·4축 모델의견·funding gap 동시 노출 |
+| 권고의 "근거" 투명화 | 기업 스코어카드에 $\Pi$/$Q$/$\Omega$(BL 입력 사이드카, §5.4)·모델 의견·funding gap 동시 노출 |
 | 비기술직 즉시 실행 | `action_guide`를 자연어 권고 문구로 변환(라벨 4종은 [03 §8.2](./03-bl-model-design.md) 단일 상수 모듈 인용) |
 | 신뢰 가능한 의사결정 | 모든 수치에 기준시점(`base_ym`)·데이터 출처·DRI(데이터신뢰도) 병기 |
 
@@ -213,7 +213,7 @@ flowchart LR
   subgraph DETAIL["기업 스코어카드 (디테일)"]
     HD["헤더: corp_name · tier · sector_name · base_ym · DRI"]
     BL["BL 패널: Π · Q · Ω(사이드카) · bl_return(E(R)) · current_weight → target_weight"]
-    AI["4축 모델 의견: 성장/이탈/이상/뉴스감성"]
+    AI["모델 의견: 성장/이탈/이상도(신뢰도 차감)/뉴스감성"]
     GAP["funding_gap(KRW) + action_guide"]
     NOTE["세일즈 노트(자동 생성 권고 문구)"]
   end
@@ -227,7 +227,7 @@ flowchart LR
 | 헤더 | `corp_name`, `tier`(T1/T2/T3), `sector_name`(`sector_code`), `base_ym`, `DRI` | 식별 PII는 운영본만(§8) |
 | BL 사후 | `bl_return`($E[R]$), `current_weight`, `market_weight`, `target_weight`, `weight_diff` | [03 BL 모델 §8](./03-bl-model-design.md) |
 | BL 입력(Π/Q/Ω) | `Π`/`Q`/`Ω`는 마트가 아니라 **BL 입력 사이드카**에서 읽음(§5.4) | [02 §3.2.2](./02-data-pipeline.md)·[03 §5](./03-bl-model-design.md) |
-| 4축 모델 의견 | `prob_growth_raw`, `prob_churn_raw`, `anomaly_score_raw`, `news_sentiment` + `sentiment_confidence` | XGBoost·IForest·Gemini |
+| 모델 의견 | `prob_growth_raw`, `prob_churn_raw`, `anomaly_score_raw`, `news_sentiment` + `sentiment_confidence` | XGBoost·IForest·Gemini. `anomaly_score_raw`는 뷰가 아니라 Ω 신뢰도 변조(표시 라벨: 이상도(신뢰도 차감), [03 §5.1](./03-bl-model-design.md)·§5.4) |
 | 액션 | `marketing_score`(0–100), `action_guide`, `funding_gap`(KRW) | 색·라벨 부호 정합(§1.3) |
 | 세일즈 노트 | `marketing_note`(템플릿 기반 자연어 권고) | XSS 이스케이프(§8.3) |
 
@@ -311,10 +311,10 @@ fig.update_layout(template="plotly_dark", paper_bgcolor="#0b0e14",
 | `marketing_score` | float | 0–100 우선순위 | 랭킹/분포 |
 | `action_guide` | str | 권고 라벨(단일 상수, [03 §8.2](./03-bl-model-design.md)) | 색·문구 |
 | `funding_gap` | float | KRW 권고 재배분 | gap 차트 |
-| `prob_growth_raw`, `prob_churn_raw`, `anomaly_score_raw`, `news_sentiment` | float | 4축 신호 원천 | + `sentiment_confidence` |
+| `prob_growth_raw`, `prob_churn_raw`, `anomaly_score_raw`, `news_sentiment` | float | 모델 의견 신호 원천(`anomaly_score_raw`는 Ω 신뢰도 변조, [03 §5.1](./03-bl-model-design.md)) | + `sentiment_confidence` |
 | `marketing_note`, `op_bl`, `op_ml`, `op_gemini` | str | 근거/메모 | 세일즈 노트 입력 |
 
-> 4축 신호 컬럼은 **마트가 정의하는 컬럼**이며 별도 표시명을 만들지 않는다. 화면 표기와 마트 컬럼의 매핑: 성장←`prob_growth_raw`, 이탈←`prob_churn_raw`, 이상←`anomaly_score_raw`, 뉴스감성←`news_sentiment`(신뢰도←`sentiment_confidence`).
+> 모델 의견 신호 컬럼은 **마트가 정의하는 컬럼**이며 별도 표시명을 만들지 않는다. 화면 표기와 마트 컬럼의 매핑: 성장←`prob_growth_raw`, 이탈←`prob_churn_raw`, 이상도(신뢰도 차감)←`anomaly_score_raw`, 뉴스감성←`news_sentiment`(신뢰도←`sentiment_confidence`). 단, `anomaly_score_raw`는 BL 뷰 축이 아니라 Ω 신뢰도 변조 인자다(뷰 $Q$에 기여하지 않고 $\Omega$를 팽창; [03 §5.1](./03-bl-model-design.md)·§5.4).
 >
 > 식별 컬럼(`biz_reg_no`, `jurir_no`, `stock_code`)은 **운영 마트에만** 포함하고 공개 데모 마트에서는 제거/마스킹한다(§8). 식별자 명칭은 02·용어집과 일원화하여 **`biz_reg_no`**(과거 `bizr_no` 표기 폐기)로 통일한다. 식별자 오조인(과거 `biz_reg_no`↔`jurir_no` 오조인으로 99.4% 소실, [02 §4.1](./02-data-pipeline.md))은 마트 생성 단계 crosswalk로 차단되며, 대시보드는 이미 검증된 `corp_code`만 사용한다.
 
