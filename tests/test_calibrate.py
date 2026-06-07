@@ -46,3 +46,15 @@ def test_calibrate_gamma_anom_structure() -> None:
     assert len(df) == 2 and "gamma_anom" in df.columns
     assert best.get("gamma_anom") in (0.0, 2.0)
     assert np.isfinite(best.get("lift_bl_vs_market", float("nan")))
+
+
+def test_sweep_lambda_fixed_structure_and_threading() -> None:
+    # λ_fix(C3 앵커 스케일)가 정책 손잡이로 노출·스레딩되는지 검증(run_backtest→run_from_frames→assemble).
+    frames = _load_sample("data/sample")
+    df, best = cal.sweep_lambda_fixed(frames, lambdas=(0.1, 1.0), step=6)
+    assert len(df) == 2 and "lambda_fixed" in df.columns
+    assert best.get("lambda_fixed") in (0.1, 1.0)
+    assert np.isfinite(best.get("lift_bl_vs_market", float("nan")))
+    # 손잡이가 실제로 파이프라인까지 닿는지: 두 λ_fix 의 lift 가 달라야 함(무시되면 동일).
+    lifts = df.set_index("lambda_fixed")["lift_bl_vs_market"]
+    assert lifts.loc[0.1] != lifts.loc[1.0]

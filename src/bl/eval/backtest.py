@@ -144,7 +144,7 @@ def run_backtest(
     frames: dict, *, horizon: int = LABEL_HORIZON, step: int = 1,
     min_train_months: int = DEFAULT_MIN_TRAIN_MONTHS, top_k_frac: float = DEFAULT_TOP_K_FRAC,
     seed: int = 42, tau: float | None = None, axis_weights: dict | None = None,
-    omega_scale: float = 1.0, gamma_anom: float | None = None,
+    omega_scale: float = 1.0, gamma_anom: float | None = None, lambda_fixed: float | None = None,
 ) -> dict:
     """프레임을 walk-forward 로 백테스트한다(누수 차단 point-in-time).
 
@@ -165,7 +165,7 @@ def run_backtest(
             ft = _truncate_frames(frames, t)
             res = run_from_frames(ft, base_ym=t, seed=seed, render=False, source="backtest",
                                   tau=tau, axis_weights=axis_weights, omega_scale=omega_scale,
-                                  gamma_anom=gamma_anom)
+                                  gamma_anom=gamma_anom, lambda_fixed=lambda_fixed)
             realized = realized_forward_returns(post, t, t_future)
             sc = _score_window(res["mart"], realized, top_k_frac=top_k_frac)
             if sc is None:
