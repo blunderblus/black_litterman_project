@@ -165,7 +165,9 @@ $$
 
 ---
 
-## 4. 내재균형수익률 $\Pi$ (앵커 교정)
+## 4. 앵커 $\Pi$ (무위 기본값, 구 "내재균형수익률")
+
+> **앵커의 재정의(C3)**: 본 설계에서 $\Pi$는 '진짜 시장균형(equilibrium)'의 주장이 아니라, **뷰가 없거나 불신될 때 돌아갈 무위 기본값(do-nothing default)**으로 해석한다. 따라서 균형을 전제로 한 역최적화 $\lambda$ 캘리브레이션은 폐기하고, $\Pi$의 스케일은 뷰 $Q$에 맞춰 정규화한다(§4.2).
 
 ### 4.1 과거 결함 → 교정
 
@@ -185,17 +187,25 @@ $$
   - 단일 계보: 본 추정 규칙이 권위 정의이며, [02 §3.2.7 `bl_input_data.w_mkt`](./02-data-pipeline.md)·[기획 02 PRD FR-05](../planning/02-prd.md)의 `cash_amount` 기반 서술은 위 혼합 추정(재무=cash_amount, 비재무=섹터중앙값 배수)을 함의한다.
 - $w_{\text{hybrid}}$는 **사전 앵커가 아니라 최적화 초기값($x_0$)·턴오버 기준**으로만 사용한다(§7).
 
-### 4.2 위험회피계수 $\lambda$ 산정
+### 4.2 앵커 스케일 $\lambda$ — 정규화 상수(위험회피계수 아님, C3)
 
-$\lambda$는 시장 위험프리미엄 / 시장분산으로 캘리브레이션한다.
+$\Pi=\lambda\,\Sigma\,w_{\text{mkt}}$ 의 $\lambda$는 **위험회피계수가 아니라 $\Pi$의 스케일을 정하는 정규화 상수**다(추정 대상 아님). 근거:
+
+1. 파이프라인 기본 최적화기는 최대 Sharpe(§7.1, 스케일 불변)이므로 $\lambda$는 최적화기에 들어가지 않고 **오직 $\Pi$ 대 $Q$의 상대 스케일**만 정한다.
+2. 뷰 $Q$는 $\text{Var}(Q)=\tau\cdot\overline{\text{diag}\Sigma}$로 $\lambda$와 무관하게 단위정합되므로(§5.2), $\lambda$는 "앵커 대 뷰의 영향력"을 정하는 손잡이일 뿐이다.
+3. 그 손잡이는 $\tau$도 이미 조절한다($W=\tau\Sigma(\tau\Sigma+\Omega)^{-1}$). $\lambda$와 $\tau$ 둘 다 데이터로 캘리브레이션하면 **식별 불가(identifiability)**가 된다.
+4. 앵커는 §4.1처럼 '균형(equilibrium)'이 아니라 **무위 기본값(do-nothing default)**으로 재정의했으므로, 역최적화로 $\lambda$를 역산할 이론 근거가 없다. 실측에서도 합성/실데이터의 시장수익 부호 탓에 역산 $\lambda$가 음수→$[1,5]$ 하한으로 항상 클립되어 사실상 상수였다(앵커 사후기여 ~3%로 증발).
+
+따라서 $\lambda$를 캘리브레이션하지 않고, $\Pi$를 **뷰 $Q$와 동일 스케일로 명시 정규화**한다.
 
 $$
-\lambda = \frac{E[r_{\text{mkt}}] - r_f}{\sigma_{\text{mkt}}^2},\qquad
-r_{\text{mkt}} = w_{\text{mkt}}^{\top} r,\ \ \sigma_{\text{mkt}}^2 = w_{\text{mkt}}^{\top}\Sigma\,w_{\text{mkt}}.
+\boxed{\;\Pi = \lambda_{\text{fix}}\,\sqrt{\tau_{\text{ref}}\,\overline{\text{diag}\Sigma}}\;\frac{\Sigma\,w_{\text{mkt}}}{\operatorname{rms}(\Sigma\,w_{\text{mkt}})}\;}\qquad \Rightarrow\ \ \lVert\Pi\rVert=\lambda_{\text{fix}}\,\lVert Q(\tau_{\text{ref}})\rVert .
 $$
 
-- $r_f$: 무위험수익 대용 — ECOS 기준금리(722Y001/0101000) 또는 KTB3Y(817Y002)에서 월율 환산(Track A).
-- 과거의 고정값 $\lambda=2.5$는 **출발 기본값**으로만 유지하고, 위 식으로 실측 캘리브레이션한 값을 우선한다. 비현실적 값이면 $\lambda\in[1, 5]$로 클리핑하고 로그 경고.
+- 방향은 시장균형 $\Sigma w_{\text{mkt}}$ 그대로(shape 보존), 스케일만 $\tau_{\text{ref}}$에서의 $Q$ 크기로 정규화한다.
+- $\lambda_{\text{fix}}=\lVert\Pi\rVert/\lVert Q\rVert$ at $\tau_{\text{ref}}$ (무차원). **기본값 $\lambda_{\text{fix}}=0.25$**: demo 데이터에서 기본 $\tau=0.05$의 앵커 사후기여(precision-form §9.2)가 ~30%(권고 20–50%, 앵커가 증발도 지배도 아닌 카운터웨이트)가 되도록 동결(REPORT.md 측정표).
+- $\tau_{\text{ref}}=0.05$는 정규화 기준으로 **고정**(런타임 $\tau$와 분리)하여 $\Pi$를 $\tau$ 무관으로 둔다 → 앵커↔뷰 균형은 §5.5처럼 **오직 $\tau$가 조절**한다(영업 공격성).
+- (코드 `risk_aversion` 인자는 이 $\lambda_{\text{fix}}$의 테스트용 override이며 None이면 기본값 사용.)
 
 ---
 
@@ -270,9 +280,19 @@ $$
 - **캘리브레이션 상수 $c_{\text{cal}}$**: $1-\text{conf}_i$를 무차원 보정으로 정규화하는 상수. 검증셋 reliability diagram(§9.3)에서 표본 평균 오신뢰 $\overline{1-\text{conf}}$로 추정하여 $c_{\text{cal}} = \overline{1-\text{conf}}$로 두면, 보정항의 표본 평균이 1이 되어 기준 스케일을 보존한다(평균적 뷰는 보정 무효, 상대적으로 과신한 뷰만 $\Omega$↑). 기본값은 검증셋 추정(가설: 약 0.2~0.4), 안정성 위해 클립 $c_{\text{cal}}\in[0.05, 1]$. (캘리브레이션 전 확정값 아님 — §11 등재.)
 - **하한 $\Omega_{\text{floor}}$ (과신 방지)**: $\Omega$가 비현실적으로 작으면(과신) 사후 폭주를 부르므로 단위 정합 기준에 연동한 하한을 적용한다. $\Omega_{\text{floor},kk} = \eta\cdot(P\tau\Sigma P^\top)_{kk}$, 기본 $\eta=0.05$(가설; 클립 $[0.01, 0.2]$, §9 민감도로 확정). 즉 어떤 뷰도 사전(균형)의 5%보다 더 확신할 수 없게 하여 폭주를 차단한다. 최종 $\Omega_{kk}\leftarrow \max(\Omega_{kk},\ \Omega_{\text{floor},kk})$.
 
-### 5.5 $\tau$ 설정
+### 5.5 $\tau$ 설정 — 앵커↔뷰 균형의 **유일한** 손잡이(영업 공격성)
 
-$\tau$는 사전(균형)의 불확실성 스케일이다. 기본값 $\tau=0.05$를 유지하되, $\tau$는 $\Omega$와 **함께** 사후 가중을 결정하므로 §5.4의 단위정합으로 $\tau$의 해석 일관성을 확보한다. 민감도 분석(§9)으로 $\tau\in\{0.025, 0.05, 0.1\}$ 점검.
+$\tau$는 사전(무위 기본값)의 불확실성 스케일이다. 기본값 $\tau=0.05$를 유지한다. C3(§4.2)로 $\lambda$를 정규화 상수로 고정했으므로, **앵커 대 뷰의 균형은 이제 $\tau$ 하나로만 조절**된다(이중 손잡이 제거).
+
+단위정합으로 $Q\propto\sqrt{\tau}$·$\Omega\propto\tau$ 라 $W=\tau\Sigma(\tau\Sigma+\Omega)^{-1}$ 는 $\tau$ 무관이고, $\Pi$는 $\tau_{\text{ref}}$로 고정되어 $\tau$ 무관이다. 따라서 $\tau$를 키우면 $Q$만 커져 **뷰가 앵커를 지배(공격적)**, 줄이면 **앵커가 do-nothing으로 당김(보수적)** — 단조 성립한다(demo 실측, REPORT.md §4).
+
+| $\tau$ | 영업 해석 | 앵커 사후기여 | 뷰 기여 | $\overline{\lVert w^*-w_{\text{mkt}}\rVert}$ |
+| --- | --- | --- | --- | --- |
+| 0.025 | 보수적(현상유지 근방) | 38.7% | 61.3% | 0.0254 |
+| 0.050 | 균형(기본) | 30.9% | 69.1% | 0.0284 |
+| 0.100 | 공격적(뷰 추종) | 24.0% | 76.0% | 0.0310 |
+
+> 정규화 이전(λ→1.0 클립)에는 $\overline{\lVert w^*-w_{\text{mkt}}\rVert}$ 가 0.0370→0.0372로 거의 불변 = $\tau$가 손잡이로 작동하지 않았다. C3 이후 의미 있게 단조 이동하여 $\tau$가 손잡이로 복원되었다. 민감도 분석(§9)으로 $\tau\in\{0.025, 0.05, 0.1\}$ 점검.
 
 ---
 
@@ -325,7 +345,7 @@ $$
 | 턴오버 패널티 | $\max_w\ E[R]^{\top}w - \tfrac{\lambda_{\text{opt}}}{2}w^{\top}\Sigma_{\text{post}}w - \gamma\lVert w - w_{\text{current}}\rVert_1$ | 영업역량 전환비용 반영 |
 
 - 턴오버 패널티 $\gamma$는 "영업자원 재배분 비용"을 표현한다(과거 multi-objective의 turnover penalty×10, $\alpha=0.7$을 정규화·캘리브레이션).
-- **위험회피 기호 구분**: 효용함수의 위험회피계수 $\lambda_{\text{opt}}$는 $\Pi$ 역최적화의 시장 위험회피 $\lambda$(§4.2, 캘리브레이션·클립[1,5])와 **별개 파라미터**다. 기본은 $\lambda_{\text{opt}}=\lambda$로 두되(일관 사용), 영업정책상 위험선호를 달리하려면 독립 설정 가능하다(§11에 별도 기재).
+- **위험회피 기호 구분(중요)**: mean_variance 효용함수의 위험회피계수 $\lambda_{\text{opt}}$(코드 `optimize_weights(risk_aversion=...)`, 기본 2.5)는 $\Pi$ 앵커 스케일 $\lambda_{\text{fix}}$(§4.2, **정규화 상수**, 위험회피 아님)와 **무관한 별개 파라미터**다. 둘은 의미·값·자리(목적함수 vs 입력구성)가 다르므로 동일시하지 않는다. 더욱이 파이프라인 기본 목적함수는 최대 Sharpe(스케일 불변)이므로 $\lambda_{\text{opt}}$는 기본 경로에서 **사용되지 않는다**(min_variance/mean_variance·턴오버 패널티 선택 시에만 관여).
 
 ### 7.2 제약
 
@@ -463,7 +483,7 @@ flowchart LR
 | # | 결함(과거 토이) | 영향 | 격상판 교정 | 본문 |
 | --- | --- | --- | --- | --- |
 | 1 | **공분산 대각만**(`np.diag(S)`), "잔액 변동계수²" | 분산효과 소실, $(\tau\Sigma)^{-1}$ 폭주 유발 | log-return 패널의 **FULL 공분산 + Ledoit-Wolf 수축**, PSD/조건수 보장 | §3 |
-| 2 | **$\Pi$를 $w_{\text{hybrid}}$에 앵커** | 현상유지 순환논리, 균형 철학 위배 | $\Pi=\lambda\Sigma\,w_{\text{mkt}}$ (지갑규모 앵커), $\lambda$ 캘리브레이션 | §4 |
+| 2 | **$\Pi$를 $w_{\text{hybrid}}$에 앵커** | 현상유지 순환논리, 균형 철학 위배 | $\Pi\propto\Sigma\,w_{\text{mkt}}$ (지갑규모 앵커=무위 기본값), $\lambda$는 Q 스케일 정규화 상수($\lambda_{\text{fix}}$, C3) | §4 |
 | 3 | **$Q$($\approx0.01$)·$\Omega$($\approx17$) 단위 부정합, $P$ 미사용** | 뷰가 사실상 무력/과대, 닫힌식 가정 깨짐 | $\Omega$ 단위정합 $(P\tau\Sigma P^\top)\cdot\frac{1}{\text{DRI}^2}$, $P$ 명시 구성, confidence 실측 캘리브레이션 | §5 |
 | 4 | **대각 근사 사후식 + `reg=1e-6` 하드 바닥** | 사후 $E[R]_{\max}=1.29$ 폭주(Π평균 $\approx0.0103$ 대비 약 125배) | **full 행렬 사후식** + Cholesky solve + 수축·고유값바닥, 정상범위 검증 | §6 |
 | 5 | **출력 퇴화**($\Delta\approx10^{-10}$)·**방향-액션 불일치**·중복자산 미dedup | weight_diff 무의미, 'Aggressive Buy' 오발령, 합≠1 | 자산 dedup(ID crosswalk) + 부호보존 점수매핑 + 라벨 단일소스 + 0-잔액 가드 | §7–8 |
@@ -476,9 +496,9 @@ flowchart LR
 
 | 파라미터 | 기호 | 기본값 | 산정/비고 |
 | --- | --- | --- | --- |
-| 사전 불확실성 스케일 | $\tau$ | 0.05 | 민감도 {0.025,0.05,0.1} |
-| 시장 위험회피($\Pi$ 앵커) | $\lambda$ | 캘리브레이션(시작 2.5) | $(E[r_{mkt}]-r_f)/\sigma_{mkt}^2$, 클립[1,5] |
-| 효용 위험회피(최적화) | $\lambda_{\text{opt}}$ | 기본 $=\lambda$ | 필요 시 독립 설정(§7.1) |
+| 사전 불확실성 스케일(앵커↔뷰 손잡이) | $\tau$ | 0.05 | **유일한 균형 손잡이**(영업 공격성). 민감도 {0.025,0.05,0.1}=보수/균형/공격(§5.5) |
+| $\Pi$ 스케일 정규화 상수 | $\lambda_{\text{fix}}$ | **0.25**(고정) | 위험회피 아님·추정 아님. $\lVert\Pi\rVert=\lambda_{\text{fix}}\lVert Q(\tau_{\text{ref}})\rVert$, 앵커 사후기여 ~30%로 동결(§4.2, C3) |
+| 효용 위험회피(최적화, mean_variance 전용) | $\lambda_{\text{opt}}$ | 2.5 | $\lambda_{\text{fix}}$와 **무관**. 기본 목적함수 Sharpe에선 미사용(§7.1) |
 | 수축강도 | $\delta$ | Ledoit-Wolf 자동 | $T<N$ 시 필수 |
 | 고유값 바닥 | $\lambda_{\text{floor}}$ | $10^{-8}\,\text{tr}\Sigma/N$ | 하드 reg 폐기. $\Sigma_{\text{post}}$에도 상속 |
 | 조건수 상한 | $\kappa_{\max}$ | $10^6$ | 초과 시 수축↑. $\Sigma$·$\Sigma_{\text{post}}$ 공통 |

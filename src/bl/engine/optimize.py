@@ -18,7 +18,8 @@
 미구현(후속 단계, 본 모듈 범위 밖):
 - §5.4 Ω 하한(η·(PτΣPᵀ)kk) 적용 → engine/inputs.py(P4 입력 구성, Ω 생성 시점).
 - §8 출력 변환(weight_diff→marketing_score(부호보존)→action_guide→funding_gap) → serve/mart.py.
-- §9.4 사후수익 범위 빌드-페일 가드, λ 캘리브레이션([1,5]) → models/validation.py·engine/inputs.py.
+- §9.4 사후수익 범위 빌드-페일 가드 → models/validation.py.
+  (앵커 λ는 캘리브레이션 대상이 아니라 Π 스케일 정규화 상수 LAMBDA_FIXED 로 고정됨 — engine/inputs.py, C3.)
 """
 
 from __future__ import annotations
@@ -140,6 +141,8 @@ def optimize_weights(
 
     제약: Σw=1, 0≤wᵢ≤w_max, exclude 인덱스는 0 고정.
     objective: 'sharpe'(최대 샤프) | 'min_variance' | 'mean_variance'(λ=risk_aversion).
+    이 risk_aversion 은 mean_variance 목적함수 전용 최적화기 파라미터로, inputs.py 의 앵커 λ(Π 스케일
+    정규화 상수)와 **무관한 별개 값**이다. 파이프라인 기본 목적함수 'sharpe'(스케일 불변)에서는 쓰이지 않는다.
     gate_psd: True면 cov를 §3.3 ensure_psd 게이트에 통과시킨다(설계 §6.2 정합).
 
     Raises: ValueError (비유한 입력 / 차원 불일치 / exclude 범위 / 실현 불가능 / 솔버 미수렴/제약 위반).

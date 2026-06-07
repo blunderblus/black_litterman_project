@@ -32,9 +32,9 @@
 
 진입점 요약이며, 상세 정식화·산식은 [BL 모델 설계](docs/design/03-bl-model-design.md) 참조.
 
-- **앵커(역최적화)**: $\Pi = \lambda\,\Sigma\,w_{mkt}$ — 앵커는 **지갑(예금)규모 비중 $w_{mkt}$**다($w_{hybrid}$ 아님; $w_{hybrid}$는 최적화 초기값·턴오버 기준으로만 사용).
+- **앵커(무위 기본값)**: $\Pi \propto \Sigma\,w_{mkt}$ — 앵커는 **지갑(예금)규모 비중 $w_{mkt}$**다($w_{hybrid}$ 아님). 스케일 $\lambda$는 **위험회피계수가 아니라 $\Pi$를 뷰 $Q$ 스케일에 맞추는 정규화 상수**($\lambda_{\text{fix}}=0.25$, 추정 대상 아님). 앵커↔뷰 균형(=영업 공격성)은 $\tau$ 하나로 조절(C3, [설계 §4.2/§5.5](docs/design/03-bl-model-design.md)).
 - **사후 기대수익**: $E[R] = \big[(\tau\Sigma)^{-1} + P^{\top}\Omega^{-1}P\big]^{-1}\big[(\tau\Sigma)^{-1}\Pi + P^{\top}\Omega^{-1}Q\big]$ (FULL 행렬, Cholesky solve).
-- **확정 파라미터(가설값 포함)**: $\tau = 0.05$(민감도 0.025/0.05/0.1) · $\lambda$ = 캘리브레이션(출발 기본값 2.5, 클립 $[1,5]$) · $w_{\max} = 0.10$ · 수익률 = 잔액 log-return.
+- **확정 파라미터**: $\tau = 0.05$(앵커↔뷰 손잡이; 민감도 0.025/0.05/0.1=보수/균형/공격) · $\lambda_{\text{fix}} = 0.25$($\Pi$ 스케일 정규화 상수, 앵커 사후기여 ~30%) · $w_{\max} = 0.10$ · 수익률 = 잔액 log-return.
 - **수치 안정화**: 고정 reg 하드바닥 폐기 → 고유값 바닥 $\lambda_{\text{floor}} = 10^{-8}\cdot \mathrm{tr}\Sigma/N$, 조건수 상한 $\kappa_{\max} = 10^6$.
 
 ---
