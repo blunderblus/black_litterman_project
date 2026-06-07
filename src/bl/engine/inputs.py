@@ -1,8 +1,17 @@
-"""BL 입력 빌더 — Σ · Π(=λΣw_mkt) · P · Q(3축) · Ω(∝1/DRI²·anomaly) · τ 구성.
+"""BL 입력 빌더 — Σ · Π(앵커, ∝Σw_mkt) · P · Q(3축) · Ω(∝1/DRI²·anomaly) · τ 구성.
 
 설계: docs/design/03-bl-model-design.md §4~§5. 과거 노트북 09 대응.
 과거 토이 결함 교정: 앵커를 w_mkt로(현상유지 w_hybrid 아님), Q·Ω·τΣ **단위 정합**(분산정합),
 Ω∝1/DRI²(+§5.4 하한·M_DRI 캡) 보존, confidence 기반 가중(c_cal 데이터기반).
+
+앵커 λ(C3 해소): Π=λΣw_mkt 의 λ는 **위험회피계수가 아니라 Π 스케일 정규화 상수**다(추정 대상 아님).
+과거의 역최적화 캘리브레이션(calibrate_lambda)은 폐기했다 — 앵커를 '균형(equilibrium)'이 아니라
+'무위 기본값(do-nothing default)'으로 재정의했으므로 역산할 이론 근거가 없고, 실측에서도 합성/실데이터
+시장수익 부호 때문에 역산 λ가 음수→[1,5] 하한으로 항상 클립되어 사실상 상수였다(앵커 사후기여 ~3%로
+증발). 대신 Π를 뷰 Q 와 **동일 스케일로 명시 정규화**(LAMBDA_FIXED)하여 앵커가 사후에 의미 있는
+카운터웨이트(기본 τ에서 ~30%)가 되게 하고, 앵커↔뷰 균형(=영업 공격성)은 **τ 하나로 일원화**한다
+(λ·τ 이중 손잡이의 식별 불가 문제 제거). 단위정합으로 Q∝√τ·Ω∝τ 라 W=τΣ(τΣ+Ω)⁻¹ 는 τ 무관이고
+Π를 τ 무관 스케일로 고정하므로, τ↑→뷰 지배(공격적)·τ↓→앵커 지배(보수적)가 단조 성립한다.
 
 핵심은 **순수 함수 assemble_bl_inputs(DataFrame+패널)** 이다. DB/ingest 경로도 pipeline.run()
 (load_frames→프레임)을 거쳐 동일 함수로 수렴하므로 별도 DuckDB 결합 래퍼를 두지 않는다(단일 경로).
@@ -30,12 +39,17 @@ AXIS_WEIGHTS = {"news": 0.412, "pattern": 0.412, "relationship": 0.176}
 DRI_WEIGHTS = {"has_financial": 0.3, "has_news": 0.25, "is_listed": 0.15, "trx_activity": 0.2}
 DRI_BASE = 0.1
 DEFAULT_TAU = 0.05
+TAU_REF = DEFAULT_TAU       # Π 스케일 정규화 기준 τ(런타임 τ와 분리 → τ가 앵커↔뷰 손잡이로 작동)
 OMEGA_FLOOR_ETA = 0.05      # Ω 하한 = η·(PτΣPᵀ)kk (§5.4, 과신 폭주 방지)
 M_DRI = 100.0             # 1/DRI² 증폭 상한(§5.4)
 # anomaly_score(이상 크기, in-distribution 여부)에 의한 Ω 팽창 게인. DRI·conf 와 같은 신뢰도 요인.
 # 추정 대상이 아닌 기본값이며, 추후 eval.calibrate(calibrate_gamma_anom)에서 실현 적중률로 캘리브레이션한다.
 GAMMA_ANOM = 2.0
-LAMBDA_CLIP = (1.0, 5.0)   # λ 클립 범위(§4.2)
+# Π 스케일 정규화 상수(무차원). Π=λΣw_mkt 의 λ 자리이나 **위험회피계수가 아니다**(추정 대상 아님).
+# 정의: 기준 τ_ref 에서 ‖Π‖/‖Q‖. 앵커-뷰 균형(=영업 공격성)은 λ가 아니라 τ로 조절한다(C3).
+# 값 동결 근거: demo 데이터에서 τ=0.05 기준 앵커 사후기여(precision-form §9.2)가 ~30%(20–50% 권고대)가
+# 되도록 스윕 선정(REPORT.md 측정표). 과거 calibrate_lambda 는 시장수익 부호 탓에 항상 1.0(앵커 ~3%).
+LAMBDA_FIXED = 0.25
 Q_CLIP_SIGMA = 3.0        # |Q| ≤ Q_CLIP_SIGMA·σ_asset 클립(§5.2)
 
 
@@ -53,24 +67,6 @@ def _zscore(x: np.ndarray) -> np.ndarray:
     """배치 z-score. 표준편차 0이면 0 벡터(추론 시 고정 스케일러 권장, ADR-0004)."""
     mu, sd = float(np.mean(x)), float(np.std(x))
     return (x - mu) / sd if sd > 1e-12 else np.zeros_like(x)
-
-
-def calibrate_lambda(returns_panel, w_mkt: np.ndarray, sigma: np.ndarray, rf: float = 0.0) -> float:
-    """위험회피 λ = (E[r_mkt] − r_f)/σ²_mkt, σ²_mkt = w_mktᵀΣw_mkt, [1,5] 클립(§4.2)."""
-    r = np.asarray(returns_panel, dtype="float64")
-    r_mkt = r @ w_mkt
-    var = float(w_mkt @ np.asarray(sigma, dtype="float64") @ w_mkt)
-    if var <= 1e-18:
-        log.warning("σ²_mkt≈0 → λ 기본값 2.5", extra={"stage": "engine.inputs"})
-        return 2.5
-    lam = (float(np.mean(r_mkt)) - rf) / var
-    if not np.isfinite(lam):
-        log.warning("λ 비유한 → 2.5", extra={"stage": "engine.inputs"})
-        return 2.5
-    clipped = float(np.clip(lam, *LAMBDA_CLIP))
-    if abs(clipped - lam) > 1e-9:
-        log.warning(f"λ={lam:.3f} → [1,5] 클립 {clipped}", extra={"stage": "engine.inputs"})
-    return clipped
 
 
 def build_views(
@@ -134,7 +130,6 @@ def assemble_bl_inputs(
     *,
     tau: float = DEFAULT_TAU,
     risk_aversion: float | None = None,
-    rf: float = 0.0,
     scaler: dict | None = None,
     conf_cal: float | None = None,
     axis_weights: dict | None = None,
@@ -144,6 +139,8 @@ def assemble_bl_inputs(
 ) -> dict:
     """자산 메타(assets)와 수익률 패널(T×N)로 BL 입력 dict를 구성한다(절대뷰 P=I).
 
+    Π=앵커(∝Σw_mkt), 스케일은 LAMBDA_FIXED 로 뷰 Q(τ_ref)에 정규화(C3: λ는 정규화 상수, 위험회피 아님).
+    risk_aversion 은 그 λ override(테스트용); None 이면 LAMBDA_FIXED. 앵커↔뷰 균형은 τ로 일원화.
     Q는 분산정합(Var(Q)=τ·mean(diagΣ))으로 τΣ·Ω와 단위를 맞추고 |Q|≤3σ로 클립한다.
     Ω = base·min(1/DRI²,M_DRI)·((1−conf)/c_cal)·(1+γ_anom·anomaly), base=τΣkk, 하한 η·base.
     anomaly(이상 크기 ∈[0,1])는 in-distribution 신뢰도 신호로 Ω 를 팽창시킨다(방향 뷰 아님).
@@ -174,13 +171,20 @@ def assemble_bl_inputs(
         if "w_current" in assets.columns else w_mkt.copy()
     )
 
-    lam = risk_aversion if risk_aversion is not None else calibrate_lambda(panel, w_mkt, sigma, rf)
-    pi = lam * (sigma @ w_mkt)                             # 내재균형수익 Π=λΣw_mkt
+    # 앵커 Π(do-nothing default): 방향은 시장균형 Σw_mkt(현상유지 아님), 스케일은 뷰 Q 와 정합(C3).
+    # λ는 위험회피계수가 아니라 'Π를 Q 스케일로 맞추는 무차원 정규화 상수'(추정 대상 아님).
+    # q_ref=√(τ_ref·meanΣ)=Q 가 기준 τ_ref 에서 갖는 원소 스케일 → ‖Π‖=λ·‖Q(τ_ref)‖ 로 정규화.
+    # q_ref 는 런타임 τ가 아닌 TAU_REF 고정 → Π는 τ 무관 → 앵커↔뷰 균형은 오직 τ가 조절(단조).
+    mean_var = float(np.mean(np.diag(sigma)))
+    lam = LAMBDA_FIXED if risk_aversion is None else float(risk_aversion)  # risk_aversion = λ override(테스트용)
+    anchor = sigma @ w_mkt                                 # 시장균형 방향(shape 보존)
+    rms_anchor = math.sqrt(float(np.mean(anchor**2)))
+    pi_scale = lam * math.sqrt(TAU_REF * mean_var) / rms_anchor if rms_anchor > 1e-18 else 0.0
+    pi = pi_scale * anchor                                 # Π = pi_scale·Σw_mkt, ‖Π‖ = λ·‖Q(τ_ref)‖
     dri = compute_dri(assets)
 
     # Q 단위정합: c = sqrt(τ·mean(diagΣ)/Var(q_raw)) → Var(Q)=τ·mean(diagΣ) (§5.2 method 2)
     q_raw = build_views(assets, scaler, axis_weights)
-    mean_var = float(np.mean(np.diag(sigma)))
     var_qraw = float(np.var(q_raw))
     c = math.sqrt(tau * mean_var / var_qraw) if var_qraw > 1e-18 else 0.0
     q = q_raw * c
@@ -220,5 +224,5 @@ def assemble_bl_inputs(
         "lambda": lam,
         "metadata": {"n": n, "q_scale": c, "c_cal": ccal,
                      "axis_weights": axis_weights or AXIS_WEIGHTS, "omega_scale": float(omega_scale),
-                     "gamma_anom": gamma},
+                     "gamma_anom": gamma, "lambda_effective": float(pi_scale)},
     }
